@@ -1,9 +1,10 @@
 """
 Camada de banco de dados MySQL da Keilinks
-Conexao, tabelas, CRUD para knowledge, conversas, crawler_log e memoria.
+Conexao, tabelas, CRUD para knowledge, conversas, crawler_log, memoria, usuarios e chats.
 """
 
 import os
+import hashlib
 import pymysql
 from datetime import datetime
 
@@ -81,6 +82,34 @@ def inicializar_banco():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    senha_hash VARCHAR(255) NOT NULL,
+                    nome VARCHAR(100),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chats (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    usuario_id INT NOT NULL,
+                    titulo VARCHAR(200) DEFAULT 'Nova conversa',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            # Adiciona colunas chat_id e usuario_id na tabela conversas (se nao existirem)
+            try:
+                cur.execute("ALTER TABLE conversas ADD COLUMN chat_id INT DEFAULT NULL")
+            except pymysql.err.OperationalError:
+                pass  # coluna ja existe
+            try:
+                cur.execute("ALTER TABLE conversas ADD COLUMN usuario_id INT DEFAULT NULL")
+            except pymysql.err.OperationalError:
+                pass  # coluna ja existe
         conn.commit()
         print("[MySQL] Banco e tabelas prontos")
     finally:
@@ -178,15 +207,21 @@ def knowledge_por_fonte() -> dict:
 
 # ─── Conversas CRUD ──────────────────────────────────────────────────────
 
-def conversa_salvar(pergunta: str, resposta: str, fonte: str = 'desconhecido'):
+def conversa_salvar(pergunta: str, resposta: str, fonte: str = 'desconhecido',
+                    chat_id: int = None, usuario_id: int = None):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO conversas (pergunta, resposta, fonte) VALUES (%s, %s, %s)",
-                (pergunta, resposta, fonte)
+                "INSERT INTO conversas (pergunta, resposta, fonte, chat_id, usuario_id) VALUES (%s, %s, %s, %s, %s)",
+                (pergunta, resposta, fonte, chat_id, usuario_id)
             )
         conn.commit()
+        # Atualiza updated_at do chat
+        if chat_id:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE chats SET updated_at = NOW() WHERE id = %s", (chat_id,))
+            conn.commit()
     finally:
         conn.close()
 
@@ -273,6 +308,164 @@ def memoria_todos() -> dict:
         with conn.cursor() as cur:
             cur.execute("SELECT chave, valor FROM memoria")
             return {r['chave']: r['valor'] for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+# ─── Usuarios CRUD ──────────────────────────────────────────────────────
+
+AUTH_SECRET = 'keilinks_secret_2024'
+
+
+def _hash_senha(senha: str) -> str:
+    return hashlib.sha256(senha.encode('utf-8')).hexdigest()
+
+
+def _gerar_token(username: str) -> str:
+    return hashlib.sha256((username + AUTH_SECRET).encode('utf-8')).hexdigest()
+
+
+def usuario_criar(username: str, senha: str, nome: str = None) -> dict | None:
+    """Cria usuario. Retorna dict com id/username/nome/token ou None se ja existe."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM usuarios WHERE username = %s", (username,))
+            if cur.fetchone():
+                return None  # ja existe
+            senha_hash = _hash_senha(senha)
+            cur.execute(
+                "INSERT INTO usuarios (username, senha_hash, nome) VALUES (%s, %s, %s)",
+                (username, senha_hash, nome or username)
+            )
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, nome FROM usuarios WHERE username = %s", (username,))
+            user = cur.fetchone()
+        user['token'] = _gerar_token(username)
+        return user
+    finally:
+        conn.close()
+
+
+def usuario_login(username: str, senha: str) -> dict | None:
+    """Autentica usuario. Retorna dict com id/username/nome/token ou None."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, username, nome, senha_hash FROM usuarios WHERE username = %s",
+                (username,)
+            )
+            user = cur.fetchone()
+            if not user:
+                return None
+            if user['senha_hash'] != _hash_senha(senha):
+                return None
+            del user['senha_hash']
+            user['token'] = _gerar_token(username)
+            return user
+    finally:
+        conn.close()
+
+
+def usuario_por_token(token: str) -> dict | None:
+    """Busca usuario pelo token. Retorna dict com id/username/nome ou None."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, nome FROM usuarios")
+            for user in cur.fetchall():
+                if _gerar_token(user['username']) == token:
+                    return user
+        return None
+    finally:
+        conn.close()
+
+
+# ─── Chats CRUD ─────────────────────────────────────────────────────────
+
+def chat_criar(usuario_id: int, titulo: str = 'Nova conversa') -> dict:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chats (usuario_id, titulo) VALUES (%s, %s)",
+                (usuario_id, titulo)
+            )
+        conn.commit()
+        chat_id = cur.lastrowid
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM chats WHERE id = %s", (chat_id,))
+            row = cur.fetchone()
+            for k in ('created_at', 'updated_at'):
+                if isinstance(row.get(k), datetime):
+                    row[k] = row[k].isoformat()
+            return row
+    finally:
+        conn.close()
+
+
+def chat_listar(usuario_id: int) -> list:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, titulo, created_at, updated_at FROM chats WHERE usuario_id = %s ORDER BY updated_at DESC",
+                (usuario_id,)
+            )
+            rows = cur.fetchall()
+            for r in rows:
+                for k in ('created_at', 'updated_at'):
+                    if isinstance(r.get(k), datetime):
+                        r[k] = r[k].isoformat()
+            return rows
+    finally:
+        conn.close()
+
+
+def chat_mensagens(chat_id: int, usuario_id: int) -> list | None:
+    """Retorna mensagens de um chat. None se chat nao pertence ao usuario."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM chats WHERE id = %s AND usuario_id = %s", (chat_id, usuario_id))
+            if not cur.fetchone():
+                return None
+            cur.execute(
+                "SELECT pergunta, resposta, fonte, created_at FROM conversas WHERE chat_id = %s ORDER BY id ASC",
+                (chat_id,)
+            )
+            rows = cur.fetchall()
+            for r in rows:
+                if isinstance(r.get('created_at'), datetime):
+                    r['created_at'] = r['created_at'].isoformat()
+            return rows
+    finally:
+        conn.close()
+
+
+def chat_deletar(chat_id: int, usuario_id: int) -> bool:
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM chats WHERE id = %s AND usuario_id = %s", (chat_id, usuario_id))
+            if not cur.fetchone():
+                return False
+            cur.execute("DELETE FROM conversas WHERE chat_id = %s", (chat_id,))
+            cur.execute("DELETE FROM chats WHERE id = %s", (chat_id,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def chat_atualizar_titulo(chat_id: int, titulo: str):
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE chats SET titulo = %s WHERE id = %s", (titulo[:200], chat_id))
+        conn.commit()
     finally:
         conn.close()
 

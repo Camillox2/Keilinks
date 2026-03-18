@@ -29,6 +29,8 @@ from dados.database import (
     conversa_salvar, conversa_historico,
     knowledge_total, knowledge_por_fonte,
     crawler_log_recentes, memoria_get, memoria_set, memoria_todos,
+    usuario_criar, usuario_login, usuario_por_token,
+    chat_criar, chat_listar, chat_mensagens, chat_deletar, chat_atualizar_titulo,
 )
 from busca.web import pesquisar, precisa_buscar
 from cerebro.crawler import CrawlerBackground
@@ -239,6 +241,13 @@ def chat():
     tipo        = dados.get('modelo', 'flash')
     temperatura = float(dados.get('temperatura', 0.8))
     max_tokens  = int(dados.get('max_tokens', 200))
+    chat_id     = dados.get('chat_id')
+    token       = dados.get('token')
+
+    # Autenticacao opcional — pega usuario se tiver token
+    user = None
+    if token:
+        user = usuario_por_token(token)
 
     if not mensagem:
         return jsonify({'erro': 'Mensagem vazia'}), 400
@@ -328,13 +337,26 @@ def chat():
 
     memoria.atualizar(mensagem_original, resposta)
 
-    if fonte not in ['fallback']:
+    # So salva pra treino se a resposta faz sentido pro contexto
+    # Nao salva respostas do modelo (podem ser lixo) nem fallback
+    if fonte in ['retrieval', 'knowledge', 'web']:
         salvar_conversa_txt(mensagem_original, resposta)
         retrieval.adicionar(mensagem_original, resposta)
 
     # Salva no MySQL (guarda a mensagem original do usuario)
-    conversa_salvar(mensagem_original, resposta, fonte)
+    uid = user['id'] if user else None
+    conversa_salvar(mensagem_original, resposta, fonte, chat_id=chat_id, usuario_id=uid)
     contador_conversas += 1
+
+    # Auto-gera titulo do chat na primeira mensagem
+    if chat_id and user:
+        try:
+            msgs = chat_mensagens(chat_id, user['id'])
+            if msgs and len(msgs) == 1:
+                titulo = mensagem_original[:80]
+                chat_atualizar_titulo(chat_id, titulo)
+        except Exception:
+            pass
 
     # Re-treino periodico
     if contador_conversas % RETREINAR_A_CADA == 0:
@@ -370,6 +392,103 @@ def crawl_manual():
     topicos = dados.get('topicos', None)
     novos = crawler.crawl_agora(topicos)
     return jsonify({'novos_fatos': novos, 'total': knowledge.total()})
+
+
+# ─── Autenticacao helper ─────────────────────────────────────────────────
+
+def autenticar():
+    """Extrai usuario do token no header ou body. Retorna dict do usuario ou None."""
+    token = None
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        token = auth[7:]
+    if not token:
+        dados = request.get_json(silent=True) or {}
+        token = dados.get('token')
+    if not token:
+        return None
+    return usuario_por_token(token)
+
+
+# ─── Auth endpoints ──────────────────────────────────────────────────────
+
+@app.route('/api/registrar', methods=['POST'])
+def registrar():
+    dados = request.get_json(force=True) or {}
+    username = dados.get('username', '').strip().lower()
+    senha = dados.get('senha', '').strip()
+    nome = dados.get('nome', '').strip() or username
+
+    if not username or not senha:
+        return jsonify({'erro': 'Username e senha obrigatorios'}), 400
+    if len(username) < 3:
+        return jsonify({'erro': 'Username precisa ter pelo menos 3 caracteres'}), 400
+    if len(senha) < 4:
+        return jsonify({'erro': 'Senha precisa ter pelo menos 4 caracteres'}), 400
+
+    user = usuario_criar(username, senha, nome)
+    if not user:
+        return jsonify({'erro': 'Username ja existe'}), 409
+
+    return jsonify(user)
+
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    dados = request.get_json(force=True) or {}
+    username = dados.get('username', '').strip().lower()
+    senha = dados.get('senha', '').strip()
+
+    if not username or not senha:
+        return jsonify({'erro': 'Username e senha obrigatorios'}), 400
+
+    user = usuario_login(username, senha)
+    if not user:
+        return jsonify({'erro': 'Username ou senha incorretos'}), 401
+
+    return jsonify(user)
+
+
+# ─── Chats endpoints ─────────────────────────────────────────────────────
+
+@app.route('/api/chats', methods=['GET'])
+def listar_chats():
+    user = autenticar()
+    if not user:
+        return jsonify({'erro': 'Nao autenticado'}), 401
+    return jsonify(chat_listar(user['id']))
+
+
+@app.route('/api/chats', methods=['POST'])
+def criar_chat():
+    user = autenticar()
+    if not user:
+        return jsonify({'erro': 'Nao autenticado'}), 401
+    dados = request.get_json(force=True) or {}
+    titulo = dados.get('titulo', 'Nova conversa')
+    chat = chat_criar(user['id'], titulo)
+    return jsonify(chat)
+
+
+@app.route('/api/chats/<int:chat_id>', methods=['GET'])
+def ver_chat(chat_id):
+    user = autenticar()
+    if not user:
+        return jsonify({'erro': 'Nao autenticado'}), 401
+    msgs = chat_mensagens(chat_id, user['id'])
+    if msgs is None:
+        return jsonify({'erro': 'Chat nao encontrado'}), 404
+    return jsonify(msgs)
+
+
+@app.route('/api/chats/<int:chat_id>', methods=['DELETE'])
+def deletar_chat(chat_id):
+    user = autenticar()
+    if not user:
+        return jsonify({'erro': 'Nao autenticado'}), 401
+    if chat_deletar(chat_id, user['id']):
+        return jsonify({'ok': True})
+    return jsonify({'erro': 'Chat nao encontrado'}), 404
 
 
 @app.route('/api/historico')

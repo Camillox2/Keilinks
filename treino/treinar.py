@@ -7,6 +7,7 @@ Uso:
 """
 
 import torch
+import torch.nn as nn
 import sys
 import os
 import time
@@ -123,8 +124,23 @@ def treinar(tipo_modelo: str):
     os.makedirs('checkpoints', exist_ok=True)
     ckpt_tmp = f'checkpoints/keilinks_{tipo_modelo}_tmp.pt'
     if os.path.exists(ckpt_tmp):
-        ckpt = torch.load(ckpt_tmp, map_location=device)
-        modelo.load_state_dict(ckpt['modelo'])
+        ckpt = torch.load(ckpt_tmp, map_location=device, weights_only=False)
+        ckpt_vocab = ckpt['config'].get('vocab_size', 0)
+        novo_vocab = cfg_modelo['vocab_size']
+        if ckpt_vocab != novo_vocab:
+            # Vocab mudou — carrega pesos compativeis, inicializa tokens novos
+            print(f"  Vocab mudou: {ckpt_vocab} -> {novo_vocab}, ajustando pesos...")
+            state = ckpt['modelo']
+            for key in ['embedding_token.weight', 'cabeca_saida.weight']:
+                if key in state and state[key].shape[0] != novo_vocab:
+                    old_w = state[key]
+                    new_w = torch.zeros(novo_vocab, old_w.shape[1])
+                    nn.init.normal_(new_w, 0.0, 0.02)
+                    new_w[:old_w.shape[0]] = old_w
+                    state[key] = new_w
+            modelo.load_state_dict(state)
+        else:
+            modelo.load_state_dict(ckpt['modelo'])
         passo_inicial = ckpt['passo']
         print(f"  Retomando do passo {passo_inicial}\n")
 
