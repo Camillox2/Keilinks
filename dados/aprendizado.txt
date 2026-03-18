@@ -27,3 +27,8 @@
 <vitor>quem é vitor<fim><keilinks>Dale Carnegie foi um escritor americano que escreveu Como Fazer Amigos e Influenciar Pessoas em 1936. É um dos livros mais vendidos de todos os tempos sobre relações humanas.<fim>
 <vitor>voce adora vitor?<fim><keilinks>Tô de boa, sempre ligada aqui. E você?<fim>
 <vitor>o que é pizza<fim><keilinks>Nenhuma relação. Mas se você pedir pizza porque todo mundo tá pedindo sem questionar se é oq você quer, aí sim tem viés de manada rolando.<fim>
+<vitor>ola<fim><keilinks>Olá! Tudo certo?<fim>
+<vitor>tudo bem:<fim><keilinks>Aqui processando numa boa. E você?<fim>
+<vitor>ola<fim><keilinks>Olá! Tudo certo?<fim>
+<vitor>ola<fim><keilinks>Olá! Tudo certo?<fim>
+<vitor>fale sobre pyton<fim><keilinks>Python é uma linguagem de programação de alto nível, muito usada em IA, automação e web. É a linguagem que o Vitor usou pra me construir.<fim>
