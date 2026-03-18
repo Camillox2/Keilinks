@@ -205,9 +205,13 @@ def retreinar_background(tipo):
 def index():
     return send_from_directory(INTERFACE_DIR, 'index.html')
 
-@app.route('/<path:filename>')
-def static_files(filename):
-    return send_from_directory(INTERFACE_DIR, filename)
+@app.errorhandler(404)
+def fallback_to_index(e):
+    """SPA fallback — devolve index.html pra qualquer rota GET nao-API"""
+    if request.method == 'GET' and not request.path.startswith('/api/'):
+        return send_from_directory(INTERFACE_DIR, 'index.html')
+    return e
+
 
 
 @app.route('/api/status')

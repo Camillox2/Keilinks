@@ -17,7 +17,15 @@
       "Bash(tasklist)",
       "Bash(grep -r import /d/Keilinks/*.py)",
       "Bash(xargs grep:*)",
-      "Bash(ls -lh /d/Keilinks/dados/*.txt /d/Keilinks/dados/*.json)"
+      "Bash(ls -lh /d/Keilinks/dados/*.txt /d/Keilinks/dados/*.json)",
+      "Bash(curl -s -X POST http://localhost:5000/api/login -H \"Content-Type: application/json\" -d '{\"\"username\"\":\"\"admin\"\",\"\"senha\"\":\"\"admin\"\"}')",
+      "Bash(curl -s http://localhost:5000/api/status)",
+      "Bash(curl -s -X POST http://localhost:5000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"mensagem\"\"\"\":\"\"\"\"oi\"\"\"\"}')",
+      "Bash(curl -s -X OPTIONS http://localhost:5000/api/login -v)",
+      "Bash(curl -s -v -X POST http://localhost:5000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"mensagem\"\"\"\":\"\"\"\"oi\"\"\"\"}')",
+      "Bash(curl:*)",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5000 -State Listen | Select-Object LocalPort,OwningProcess\" 2>&1)",
+      "Bash(python3:*)"
     ]
   }
 }
