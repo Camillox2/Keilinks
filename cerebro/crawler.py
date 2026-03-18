@@ -303,10 +303,6 @@ def crawl_wikipedia(topicos: list[str]) -> int:
             f"o que e {resultado['titulo'].lower()}", resultado['resumo'],
             'wikipedia', cat, resultado['url'],
         )
-        knowledge_adicionar(
-            f"me fala sobre {resultado['titulo'].lower()}", resultado['resumo'],
-            'wikipedia', cat, resultado['url'],
-        )
         novos += 1
         time.sleep(0.5)
     crawler_log_salvar('wikipedia', f"{len(topicos)} topicos", True, novos)

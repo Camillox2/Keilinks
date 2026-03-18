@@ -110,12 +110,6 @@ def crawl_wikipedia_conversacao() -> int:
             chave, resultado['resumo'],
             'wikipedia', 'geral', resultado['url'],
         )
-        # Variacao
-        knowledge_adicionar(
-            f"me fala sobre {resultado['titulo'].lower()}",
-            resultado['resumo'],
-            'wikipedia', 'geral', resultado['url'],
-        )
         novos += 1
         time.sleep(0.5)
 
