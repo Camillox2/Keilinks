@@ -142,21 +142,13 @@ def knowledge_buscar(pergunta: str, limite: int = 1):
 
 
 def knowledge_existe(pergunta: str) -> bool:
-    """Verifica se ja existe um fato similar (para deduplicacao)"""
+    """Verifica se ja existe um fato com mesma pergunta (match exato)"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Primeiro: checa match exato
             cur.execute(
                 "SELECT id FROM knowledge WHERE pergunta = %s LIMIT 1",
                 (pergunta[:500],)
-            )
-            if cur.fetchone():
-                return True
-            # Segundo: checa FULLTEXT similar
-            cur.execute(
-                "SELECT id FROM knowledge WHERE MATCH(pergunta, resposta) AGAINST(%s IN NATURAL LANGUAGE MODE) LIMIT 1",
-                (pergunta,)
             )
             return cur.fetchone() is not None
     finally:
