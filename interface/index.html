@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keilinks</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:       #0a0a0f;
+      --surface:  #111118;
+      --border:   #1e1e2e;
+      --purple:   #7c3aed;
+      --purple2:  #a855f7;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --kei-bg:   #13131f;
+      --usr-bg:   #1a0a2e;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Fundo animado */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 20% 50%, rgba(124,58,237,0.07) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 20%, rgba(168,85,247,0.05) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    #app {
+      width: 100%;
+      max-width: 720px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 0 16px;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 20px 0 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--purple), var(--purple2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+      box-shadow: 0 0 20px rgba(124,58,237,0.4);
+    }
+
+    .header-info h1 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.offline { background: var(--muted); animation: none; }
+
+    /* Seletor de modelo */
+    .model-selector {
+      margin-left: auto;
+      display: flex;
+      gap: 6px;
+    }
+
+    .model-btn {
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .model-btn.ativo {
+      border-color: var(--purple);
+      color: var(--purple2);
+      background: rgba(124,58,237,0.1);
+    }
+
+    /* Knowledge badge */
+    .knowledge-badge {
+      margin-left: 8px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(34,197,94,0.3);
+      background: rgba(34,197,94,0.08);
+      color: #4ade80;
+      font-size: 11px;
+      cursor: help;
+      position: relative;
+    }
+
+    .knowledge-badge .tooltip {
+      display: none;
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      z-index: 10;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .knowledge-badge:hover .tooltip { display: block; }
+
+    /* Badge web/modelo na resposta */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      margin-top: 6px;
+      opacity: 0.7;
+    }
+
+    .badge.web   { background: rgba(34,197,94,0.15); color: #4ade80; }
+    .badge.flash { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .badge.ultra { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Chat */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .msg {
+      display: flex;
+      gap: 10px;
+      max-width: 85%;
+      animation: fadeUp 0.2s ease;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg.kei { align-self: flex-start; }
+    .msg.usr { align-self: flex-end; flex-direction: row-reverse; }
+
+    .msg-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .msg.kei .msg-avatar {
+      background: linear-gradient(135deg, var(--purple), var(--purple2));
+      color: white;
+    }
+
+    .msg.usr .msg-avatar {
+      background: #1e293b;
+      color: var(--muted);
+    }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .msg.kei .bubble {
+      background: var(--kei-bg);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+      color: var(--text);
+    }
+
+    .msg.usr .bubble {
+      background: var(--usr-bg);
+      border: 1px solid rgba(124,58,237,0.3);
+      border-top-right-radius: 4px;
+      color: var(--text);
+    }
+
+    /* Digitando */
+    .typing .bubble {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 12px 16px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--purple2);
+      animation: bounce 1.2s infinite;
+    }
+
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40% { transform: translateY(-5px); opacity: 1; }
+    }
+
+    /* Input */
+    #input-area {
+      padding: 16px 0 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+    }
+
+    #input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+      resize: none;
+      height: 48px;
+      line-height: 1.5;
+      font-family: inherit;
+    }
+
+    #input:focus { border-color: var(--purple); }
+    #input::placeholder { color: var(--muted); }
+
+    #btn-enviar {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, var(--purple), var(--purple2));
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.2s, transform 0.1s;
+      flex-shrink: 0;
+    }
+
+    #btn-enviar:hover { opacity: 0.85; }
+    #btn-enviar:active { transform: scale(0.95); }
+    #btn-enviar:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #btn-enviar svg { width: 18px; height: 18px; }
+
+    /* Mensagem inicial */
+    .boas-vindas {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+    }
+
+    .boas-vindas .logo {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--purple), var(--purple2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 700;
+      color: white;
+      margin: 0 auto 16px;
+      box-shadow: 0 0 40px rgba(124,58,237,0.3);
+    }
+
+    .boas-vindas h2 { font-size: 20px; color: var(--text); margin-bottom: 8px; }
+    .boas-vindas p  { font-size: 14px; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="avatar">K</div>
+    <div class="header-info">
+      <h1>Keilinks</h1>
+      <div class="status">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-txt">conectando...</span>
+      </div>
+    </div>
+    <div class="model-selector">
+      <button class="model-btn" id="btn-flash" onclick="selecionarModelo('flash')" title="Rápido, leve">Flash</button>
+      <button class="model-btn ativo" id="btn-padrao" onclick="selecionarModelo('padrao')" title="Padrão">K Padrao</button>
+      <button class="model-btn" id="btn-ultra" onclick="selecionarModelo('ultra')" title="Mais poderoso">Ultra</button>
+    </div>
+    <span class="knowledge-badge" id="knowledge-badge" title="Fatos aprendidos">
+      0 fatos
+      <div class="tooltip" id="knowledge-tooltip">Carregando...</div>
+    </span>
+  </header>
+
+  <div id="chat">
+    <div class="boas-vindas">
+      <div class="logo">K</div>
+      <h2>Keilinks</h2>
+      <p>Sua IA pessoal. Criada do zero por você.</p>
+    </div>
+  </div>
+
+  <div id="input-area">
+    <textarea id="input" placeholder="Fala alguma coisa..." rows="1"></textarea>
+    <button id="btn-enviar" title="Enviar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"></line>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+  // Usa o mesmo host da página — funciona com localhost e IP local
+  const API = window.location.origin;
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('input');
+  const btn = document.getElementById('btn-enviar');
+  const statusDot = document.getElementById('status-dot');
+  const statusTxt = document.getElementById('status-txt');
+  let modeloAtual = 'padrao';
+
+  function selecionarModelo(tipo) {
+    modeloAtual = tipo;
+    document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('ativo'));
+    document.getElementById(`btn-${tipo}`).classList.add('ativo');
+  }
+
+  // Verifica status do servidor e atualiza botões de modelo
+  async function verificarStatus() {
+    try {
+      const res = await fetch(`${API}/api/status`);
+      const data = await res.json();
+
+      if (data.online) {
+        statusDot.className = 'status-dot';
+        statusTxt.textContent = `online | ${data.gpu}`;
+      } else {
+        statusDot.className = 'status-dot offline';
+        statusTxt.textContent = 'nenhum modelo treinado';
+      }
+
+      // Atualiza botoes mostrando quais modelos estao disponiveis
+      if (data.modelos) {
+        const mapa = { flash: 'btn-flash', padrao: 'btn-padrao', ultra: 'btn-ultra' };
+        for (const [nome, info] of Object.entries(data.modelos)) {
+          const btn = document.getElementById(mapa[nome]);
+          if (!btn) continue;
+          if (info.disponivel) {
+            btn.style.opacity = '1';
+            btn.title = info.params;
+          } else {
+            btn.style.opacity = '0.35';
+            btn.title = 'Nao treinado ainda';
+          }
+        }
+      }
+
+      // Atualiza badge de knowledge
+      const badge = document.getElementById('knowledge-badge');
+      const tooltip = document.getElementById('knowledge-tooltip');
+      if (data.knowledge !== undefined) {
+        badge.textContent = `${data.knowledge} fatos`;
+        // Monta tooltip com fontes
+        if (data.knowledge_fontes) {
+          const linhas = Object.entries(data.knowledge_fontes)
+            .map(([f, n]) => `${f}: ${n}`)
+            .join('\n');
+          tooltip.textContent = linhas || 'Nenhum fato ainda';
+        }
+        // Re-adiciona tooltip (textContent remove filhos)
+        badge.appendChild(tooltip);
+      }
+    } catch {
+      statusDot.className = 'status-dot offline';
+      statusTxt.textContent = 'servidor offline';
+    }
+  }
+
+  verificarStatus();
+  setInterval(verificarStatus, 10000);
+
+  // Carrega histórico de conversas ao abrir
+  async function carregarHistorico() {
+    try {
+      const res = await fetch(`${API}/api/historico`);
+      const msgs = await res.json();
+      if (msgs.length > 0) {
+        const bv = chat.querySelector('.boas-vindas');
+        if (bv) bv.remove();
+        msgs.forEach(m => {
+          adicionarMsg(m.pergunta, 'usr', false);
+          adicionarMsg(m.resposta, 'kei', false);
+        });
+      }
+    } catch {}
+  }
+  carregarHistorico();
+
+  function adicionarMsg(texto, tipo, scroll = true) {
+    // Remove boas-vindas se existir
+    const bv = chat.querySelector('.boas-vindas');
+    if (bv) bv.remove();
+
+    const inicial = tipo === 'kei' ? 'K' : 'V';
+    const div = document.createElement('div');
+    div.className = `msg ${tipo}`;
+    div.innerHTML = `
+      <div class="msg-avatar">${inicial}</div>
+      <div class="bubble">${texto}</div>
+    `;
+    chat.appendChild(div);
+    if (scroll) chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  function mostrarDigitando() {
+    const div = document.createElement('div');
+    div.className = 'msg kei typing';
+    div.id = 'typing';
+    div.innerHTML = `
+      <div class="msg-avatar">K</div>
+      <div class="bubble">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+    `;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function removerDigitando() {
+    const t = document.getElementById('typing');
+    if (t) t.remove();
+  }
+
+  async function enviar() {
+    const texto = input.value.trim();
+    if (!texto) return;
+
+    input.value = '';
+    btn.disabled = true;
+
+    adicionarMsg(texto, 'usr');
+    mostrarDigitando();
+
+    try {
+      const res = await fetch(`${API}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mensagem: texto, modelo: modeloAtual })
+      });
+
+      const data = await res.json();
+      removerDigitando();
+
+      if (data.resposta) {
+        const msgEl = adicionarMsg(data.resposta, 'kei');
+        const badges = [];
+        const f = data.fonte;
+        if (f === 'web')       badges.push(`<span class="badge web">Web</span>`);
+        if (f === 'knowledge') badges.push(`<span class="badge flash">Aprendido</span>`);
+        if (f === 'modelo')    badges.push(`<span class="badge ultra">${data.modelo}</span>`);
+        if (f === 'retrieval') badges.push(`<span class="badge flash">Base</span>`);
+        if (badges.length) {
+          const div = document.createElement('div');
+          div.innerHTML = badges.join('');
+          msgEl.querySelector('.bubble').appendChild(div);
+        }
+      } else {
+        adicionarMsg('Nao consegui processar isso.', 'kei');
+      }
+    } catch {
+      removerDigitando();
+      adicionarMsg('Servidor offline. Rode: python api/servidor.py', 'kei');
+    }
+
+    btn.disabled = false;
+    input.focus();
+  }
+
+  btn.addEventListener('click', enviar);
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      enviar();
+    }
+  });
+
+  // Auto-resize textarea
+  input.addEventListener('input', () => {
+    input.style.height = '48px';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  });
+</script>
+</body>
+</html>
