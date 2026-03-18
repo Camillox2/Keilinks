@@ -1,7 +1,7 @@
 """
-Servidor da Keilinks v5 — Cerebro Completo + MySQL
-Camadas: Reflexao -> Retrieval -> Knowledge -> Web -> Modelo -> Fallback
-Auto-aprendizado + Crawler multi-fonte em background + MySQL
+Servidor da Keilinks v6 — Cerebro Completo + MySQL + Fuzzy
+Camadas: Normalizar -> Reflexao -> Retrieval -> Knowledge -> Web -> Modelo -> Fallback
+Auto-aprendizado + Crawler multi-fonte em background + MySQL + Traducao EN>>PT
 """
 
 import torch
@@ -34,6 +34,7 @@ from busca.web import pesquisar, precisa_buscar
 from cerebro.crawler import CrawlerBackground
 from cerebro.memoria import Memoria
 from cerebro.reflexao import Reflexao
+from cerebro.normalizador import normalizar
 
 app = Flask(__name__)
 CORS(app)
@@ -86,7 +87,7 @@ def carregar_modelo(tipo):
 
 def inicializar():
     print(f"\n{'='*50}")
-    print(f"  Keilinks v5 — MySQL + Multi-Crawler")
+    print(f"  Keilinks v6 — MySQL + Multi-Crawler + Fuzzy")
     print(f"  Device: {device.upper()}")
     if device == 'cuda':
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
@@ -127,13 +128,30 @@ def inicializar():
 def texto_eh_lixo(texto):
     if not texto or len(texto) < 3:
         return True
+    # Muita repeticao de caracteres
     if len(set(texto)) < len(texto) * 0.15:
         return True
     palavras = texto.split()
+    # Palavra unica gigante (sem espacos)
     if len(palavras) < 2 and len(texto) > 20:
         return True
+    # Muitas palavras curtinhas sem sentido
     curtas = sum(1 for p in palavras if len(p) <= 2)
     if len(palavras) > 3 and curtas / len(palavras) > 0.7:
+        return True
+    # Frases sem sentido: poucas palavras e nao parece resposta real
+    if len(palavras) <= 3 and len(texto) < 25:
+        # Precisa ter pelo menos 2 palavras com 3+ letras
+        reais = [p for p in palavras if len(p) >= 3]
+        if len(reais) < 2:
+            return True
+    # Mesma palavra repetida demais
+    if len(palavras) >= 3:
+        unicas = set(p.lower() for p in palavras)
+        if len(unicas) < max(len(palavras) * 0.6, 2):
+            return True
+    # Contem tokens especiais que vazaram
+    if any(t in texto for t in ['<vitor>', '<keilinks>', '<fim>', '<pad>']):
         return True
     return False
 
@@ -225,9 +243,15 @@ def chat():
     if not mensagem:
         return jsonify({'erro': 'Mensagem vazia'}), 400
 
+    # ─── NORMALIZACAO (corrige typos, expande abreviacoes) ────────────
+    mensagem_original = mensagem
+    mensagem_normalizada = normalizar(mensagem)
+
     # ─── REFLEXAO ─────────────────────────────────────────────────────
-    analise = reflexao.analisar(mensagem)
+    analise = reflexao.analisar(mensagem_normalizada)
     pensamento = []
+    if mensagem_normalizada != mensagem_original.lower().strip():
+        pensamento.append(f"Entendi: {mensagem_normalizada}")
     pensamento.append(f"Tipo: {analise['tipo']}")
 
     resposta = None
@@ -237,7 +261,7 @@ def chat():
 
     # ─── CAMADA 1: Retrieval ──────────────────────────────────────────
     pensamento.append("Buscando no dataset...")
-    resp_ret, score = retrieval.buscar(mensagem)
+    resp_ret, score = retrieval.buscar(mensagem_normalizada)
     if resp_ret and score >= 0.20:
         resposta = resp_ret
         fonte = 'retrieval'
@@ -246,7 +270,7 @@ def chat():
     # ─── CAMADA 2: Knowledge (MySQL) ─────────────────────────────────
     if not resposta:
         pensamento.append("Buscando no knowledge...")
-        resp_know = knowledge.buscar(mensagem)
+        resp_know = knowledge.buscar(mensagem_normalizada)
         if resp_know:
             resposta = resp_know
             fonte = 'knowledge'
@@ -255,7 +279,7 @@ def chat():
     # ─── CAMADA 3: Web ───────────────────────────────────────────────
     if not resposta and (analise['precisa_web'] or analise['tipo'] == 'pergunta_factual'):
         pensamento.append("Pesquisando na web...")
-        resultado = pesquisar(analise['topico_extraido'] or mensagem)
+        resultado = pesquisar(analise['topico_extraido'] or mensagem_normalizada)
         if resultado:
             linhas = resultado.replace('[Fonte: Wikipedia]\n', '').replace('[Fonte: Web]\n', '')
             resposta = linhas.strip()
@@ -268,7 +292,7 @@ def chat():
     # ─── CAMADA 4: Modelo neural ─────────────────────────────────────
     if not resposta and modelos_carregados:
         pensamento.append("Gerando com modelo...")
-        resp_modelo = gerar_com_modelo(mensagem, tipo, temperatura, max_tokens)
+        resp_modelo = gerar_com_modelo(mensagem_normalizada, tipo, temperatura, max_tokens)
         if resp_modelo and reflexao.validar_resposta(resp_modelo):
             resposta = resp_modelo
             fonte = 'modelo'
@@ -279,7 +303,7 @@ def chat():
     # ─── CAMADA 5: Web forcada ───────────────────────────────────────
     if not resposta:
         pensamento.append("Buscando na web (ultimo recurso)...")
-        resultado = pesquisar(mensagem)
+        resultado = pesquisar(mensagem_normalizada)
         if resultado:
             linhas = resultado.replace('[Fonte: Wikipedia]\n', '').replace('[Fonte: Web]\n', '')
             resposta = linhas.strip()
@@ -302,14 +326,14 @@ def chat():
 
     # ─── Pos-processamento ───────────────────────────────────────────
 
-    memoria.atualizar(mensagem, resposta)
+    memoria.atualizar(mensagem_original, resposta)
 
     if fonte not in ['fallback']:
-        salvar_conversa_txt(mensagem, resposta)
-        retrieval.adicionar(mensagem, resposta)
+        salvar_conversa_txt(mensagem_original, resposta)
+        retrieval.adicionar(mensagem_original, resposta)
 
-    # Salva no MySQL
-    conversa_salvar(mensagem, resposta, fonte)
+    # Salva no MySQL (guarda a mensagem original do usuario)
+    conversa_salvar(mensagem_original, resposta, fonte)
     contador_conversas += 1
 
     # Re-treino periodico

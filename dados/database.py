@@ -91,9 +91,28 @@ def inicializar_banco():
 
 def knowledge_adicionar(pergunta: str, resposta: str, fonte: str = 'web',
                         categoria: str = 'geral', url: str = None, relevancia: int = 0):
+    """Adiciona fato ao knowledge. Verifica duplicata por pergunta exata antes."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            # Checa duplicata exata pela pergunta
+            cur.execute(
+                "SELECT id FROM knowledge WHERE pergunta = %s LIMIT 1",
+                (pergunta[:500],)
+            )
+            if cur.fetchone():
+                return  # Ja existe, nao duplica
+
+            # Checa duplicata por conteudo similar (primeiros 200 chars da resposta)
+            resp_inicio = resposta[:200] if resposta else ''
+            if resp_inicio:
+                cur.execute(
+                    "SELECT id FROM knowledge WHERE LEFT(resposta, 200) = %s LIMIT 1",
+                    (resp_inicio,)
+                )
+                if cur.fetchone():
+                    return  # Resposta muito similar ja existe
+
             cur.execute(
                 "INSERT INTO knowledge (pergunta, resposta, fonte, categoria, url, relevancia) VALUES (%s, %s, %s, %s, %s, %s)",
                 (pergunta[:500], resposta, fonte, categoria, url, relevancia)
@@ -127,6 +146,14 @@ def knowledge_existe(pergunta: str) -> bool:
     conn = get_conn()
     try:
         with conn.cursor() as cur:
+            # Primeiro: checa match exato
+            cur.execute(
+                "SELECT id FROM knowledge WHERE pergunta = %s LIMIT 1",
+                (pergunta[:500],)
+            )
+            if cur.fetchone():
+                return True
+            # Segundo: checa FULLTEXT similar
             cur.execute(
                 "SELECT id FROM knowledge WHERE MATCH(pergunta, resposta) AGAINST(%s IN NATURAL LANGUAGE MODE) LIMIT 1",
                 (pergunta,)

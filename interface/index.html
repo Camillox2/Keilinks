@@ -154,6 +154,47 @@
 
     .knowledge-badge:hover .tooltip { display: block; }
 
+    /* Crawler log panel */
+    .crawler-toggle {
+      margin-left: 6px;
+      padding: 4px 8px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .crawler-toggle:hover { border-color: var(--purple); color: var(--purple2); }
+
+    .crawler-panel {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .crawler-panel.visivel { display: block; }
+    .crawler-panel h3 { font-size: 13px; color: var(--purple2); margin-bottom: 8px; }
+
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      color: var(--muted);
+    }
+    .log-item .fonte { color: var(--text); font-weight: 500; }
+    .log-item .novos { color: #4ade80; }
+    .log-item .erro { color: #f87171; }
+
     /* Badge web/modelo na resposta */
     .badge {
       display: inline-flex;
@@ -363,7 +404,13 @@
       0 fatos
       <div class="tooltip" id="knowledge-tooltip">Carregando...</div>
     </span>
+    <button class="crawler-toggle" id="btn-crawler" onclick="toggleCrawlerPanel()" title="Ver atividade do crawler">Log</button>
   </header>
+
+  <div class="crawler-panel" id="crawler-panel">
+    <h3>Atividade do Crawler</h3>
+    <div id="crawler-log">Carregando...</div>
+  </div>
 
   <div id="chat">
     <div class="boas-vindas">
@@ -552,6 +599,38 @@
 
     btn.disabled = false;
     input.focus();
+  }
+
+  // Crawler panel
+  function toggleCrawlerPanel() {
+    const panel = document.getElementById('crawler-panel');
+    panel.classList.toggle('visivel');
+    if (panel.classList.contains('visivel')) {
+      carregarCrawlerLog();
+    }
+  }
+
+  async function carregarCrawlerLog() {
+    try {
+      const res = await fetch(`${API}/api/crawler-log`);
+      const logs = await res.json();
+      const container = document.getElementById('crawler-log');
+      if (!logs.length) {
+        container.innerHTML = '<div style="color:var(--muted)">Nenhum crawl ainda</div>';
+        return;
+      }
+      container.innerHTML = logs.slice(-10).map(l => {
+        const hora = l.created_at ? l.created_at.split('T')[1]?.substring(0, 8) || '' : '';
+        const cls = l.sucesso ? 'novos' : 'erro';
+        const txt = l.sucesso ? `+${l.fatos_novos} fatos` : 'erro';
+        return `<div class="log-item">
+          <span><span class="fonte">${l.fonte}</span> ${l.topico ? '(' + l.topico.substring(0, 30) + ')' : ''}</span>
+          <span class="${cls}">${txt} ${hora}</span>
+        </div>`;
+      }).join('');
+    } catch {
+      document.getElementById('crawler-log').innerHTML = 'Erro ao carregar logs';
+    }
   }
 
   btn.addEventListener('click', enviar);
