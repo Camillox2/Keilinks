@@ -8,7 +8,10 @@
       "Bash(venv/Scripts/pip.exe install:*)",
       "Bash(venv/Scripts/python.exe -c \":*)",
       "Bash(venv/Scripts/python.exe treino/treinar.py --modelo flash --passos 300)",
-      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo ultra --passos 200)"
+      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo ultra --passos 200)",
+      "Bash(venv/Scripts/python.exe treino/gerar_dados.py)",
+      "Bash(powershell -Command \"Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,CPU,WorkingSet64 | Format-Table\")",
+      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo flash)"
     ]
   }
 }
