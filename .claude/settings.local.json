@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls -lh /d/Keilinks/dados/*.txt)"
+      "Bash(ls -lh /d/Keilinks/dados/*.txt)",
+      "Bash(find /d/Keilinks -type f -name .env* -o -name *config* -o -name *.ini -o -name *.yaml -o -name *.yml)",
+      "Bash(grep -E \"\\\\.txt$|\\\\.json$|\\\\.sql$|requirements|\\\\.env\")",
+      "Bash(du -sh /d/Keilinks/*)"
     ]
   }
 }

@@ -59,6 +59,12 @@ dados/historico.json
 .coverage
 coverage.xml
 
+# Environment variables
+.env
+
+# Embeddings cache
+dados/*.npy
+
 # Other
 node_modules/
 venv_
