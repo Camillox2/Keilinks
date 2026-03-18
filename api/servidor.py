@@ -161,28 +161,82 @@ def texto_eh_lixo(texto):
     return False
 
 
+def resposta_eh_relevante(pergunta, resposta):
+    """Checa se a resposta tem relevancia minima com a pergunta"""
+    import re
+    def _palavras(txt):
+        return set(w for w in re.findall(r'[a-z\u00e0-\u00ff]+', txt.lower()) if len(w) >= 3)
+
+    p_palavras = _palavras(pergunta)
+    r_palavras = _palavras(resposta)
+
+    if not p_palavras or not r_palavras:
+        return True  # mensagens curtas, deixa passar
+
+    # Overlap direto entre pergunta e resposta
+    overlap = p_palavras & r_palavras
+    if overlap:
+        return True
+
+    # Verifica se resposta contem palavras-chave tematicas da pergunta
+    # (ex: pergunta sobre "python" e resposta fala de "programacao")
+    TEMAS = {
+        'python': {'programacao', 'codigo', 'linguagem', 'script', 'biblioteca'},
+        'javascript': {'programacao', 'codigo', 'web', 'frontend', 'react', 'node'},
+        'keilinks': {'inteligencia', 'modelo', 'neural', 'vitor', 'criou', 'construiu'},
+        'vitor': {'criador', 'programador', 'desenvolvedor', 'keilinks', 'fez'},
+        'inteligente': {'inteligencia', 'cerebro', 'aprender', 'conhecimento', 'modelo'},
+        'triste': {'sentimento', 'emocao', 'ajudar', 'conversar'},
+        'musica': {'artista', 'cantor', 'banda', 'album', 'som'},
+        'futebol': {'time', 'jogo', 'gol', 'campeonato', 'vasco'},
+    }
+
+    for tema, relacionados in TEMAS.items():
+        if tema in p_palavras and r_palavras & relacionados:
+            return True
+
+    # Se nao achou nenhuma conexao — resposta provavelmente e irrelevante
+    # Porem, respostas longas e coerentes podem ser genericas mas ok
+    if len(r_palavras) > 15:
+        return True  # respostas longas geralmente tem alguma substancia
+
+    return False
+
+
 def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200):
     modelo = None
+    tipo_usado = None
     for t in [tipo, 'flash', 'padrao', 'ultra']:
         if t in modelos_carregados:
             modelo = modelos_carregados[t]
+            tipo_usado = t
             break
     if not modelo:
         return None
 
-    prompt = f"<vitor>{mensagem}<fim><keilinks>"
-    tokens = torch.tensor([tokenizador.encode(prompt)], dtype=torch.long).to(device)
-    with torch.no_grad():
-        saida = modelo.gerar(tokens, max_tokens=max_tokens, temperatura=temperatura)
-    texto = tokenizador.decode(saida[0].tolist())
-    if '<keilinks>' in texto:
-        resp = texto.split('<keilinks>')[-1]
-        if '<fim>' in resp:
-            resp = resp.split('<fim>')[0]
-        resp = resp.strip()
-    else:
-        resp = texto.strip()
-    return None if texto_eh_lixo(resp) else resp
+    # Modelos menores precisam de temperatura mais baixa pra nao delirar
+    temp_ajustada = min(temperatura, 0.5) if tipo_usado == 'flash' else min(temperatura, 0.6)
+
+    # Tenta gerar ate 2x — se a primeira saida for lixo, tenta com temp mais baixa
+    for tentativa in range(2):
+        temp = temp_ajustada if tentativa == 0 else 0.3
+        prompt = f"<vitor>{mensagem}<fim><keilinks>"
+        tokens = torch.tensor([tokenizador.encode(prompt)], dtype=torch.long).to(device)
+        with torch.no_grad():
+            saida = modelo.gerar(tokens, max_tokens=max_tokens, temperatura=temp)
+        texto = tokenizador.decode(saida[0].tolist())
+        if '<keilinks>' in texto:
+            resp = texto.split('<keilinks>')[-1]
+            if '<fim>' in resp:
+                resp = resp.split('<fim>')[0]
+            resp = resp.strip()
+        else:
+            resp = texto.strip()
+
+        if resp and not texto_eh_lixo(resp) and resposta_eh_relevante(mensagem, resp):
+            return resp
+
+    return None
 
 
 def salvar_conversa_txt(pergunta, resposta):
@@ -280,8 +334,8 @@ def chat():
     pensamento.append("Busca semantica...")
     resp_ret, score = retrieval.buscar(mensagem_normalizada)
 
-    if resp_ret and score >= 0.65:
-        # Score alto = resposta direta
+    if resp_ret and score >= 0.50:
+        # Score alto = resposta direta (baixamos de 0.65 pra 0.50 — retrieval e mais confiavel que o modelo)
         resposta = resp_ret
         fonte = 'retrieval'
         pensamento.append(f"Match semantico direto (score {score:.2f})")
@@ -323,11 +377,11 @@ def chat():
             pensamento.append("Modelo gerou resposta valida")
         else:
             pensamento.append("Modelo gerou lixo, descartado")
-            # Se tinha contexto semantico com score razoavel, usa ele
-            if contexto_semantico and resp_ret and score >= 0.30:
+            # Fallback: usa retrieval se tinha algo razoavel
+            if resp_ret and score >= 0.25:
                 resposta = resp_ret
                 fonte = 'retrieval'
-                pensamento.append(f"Usando retrieval (score {score:.2f})")
+                pensamento.append(f"Usando retrieval como fallback (score {score:.2f})")
 
     # ─── CAMADA 3: Web ───────────────────────────────────────────────
     if not resposta and (analise['precisa_web'] or analise['tipo'] == 'pergunta_factual'):

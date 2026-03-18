@@ -823,6 +823,7 @@
   let currentUser = null;   // { id, username, nome, token }
   let currentChatId = null;
   let isRegistroMode = false;
+  let statusInterval = null;
 
   // ─── Auth ──────────────────────────────────────────────────────────────
 
@@ -914,12 +915,19 @@
     document.getElementById('user-sub').textContent = '@' + user.username;
     carregarChats();
     verificarStatus();
+    if (!statusInterval) {
+      statusInterval = setInterval(verificarStatus, 10000);
+    }
   }
 
   function logout() {
     clearStoredUser();
     currentUser = null;
     currentChatId = null;
+    if (statusInterval) {
+      clearInterval(statusInterval);
+      statusInterval = null;
+    }
     document.getElementById('login-screen').classList.remove('hidden');
     document.getElementById('main-app').classList.remove('visible');
     document.getElementById('login-user').value = '';
@@ -1086,14 +1094,15 @@
       const badge = document.getElementById('knowledge-badge');
       const tooltip = document.getElementById('knowledge-tooltip');
       if (data.knowledge !== undefined) {
-        badge.textContent = `${data.knowledge} fatos`;
+        // Remove so os text nodes, preserva o tooltip
+        Array.from(badge.childNodes).forEach(n => { if (n.nodeType === 3) n.remove(); });
+        badge.insertBefore(document.createTextNode(`${data.knowledge} fatos `), tooltip);
         if (data.knowledge_fontes) {
           const linhas = Object.entries(data.knowledge_fontes)
             .map(([f, n]) => `${f}: ${n}`)
             .join('\n');
           tooltip.textContent = linhas || 'Nenhum fato ainda';
         }
-        badge.appendChild(tooltip);
       }
     } catch {
       statusDot.className = 'status-dot offline';
@@ -1101,15 +1110,11 @@
     }
   }
 
-  setInterval(verificarStatus, 10000);
-
   // ─── Scroll ────────────────────────────────────────────────────────────
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
-      scrollToBottom();
-      // segundo frame pro mobile (teclado pode mudar o viewport)
-      requestAnimationFrame(() => { scrollToBottom(); });
+      chat.scrollTop = chat.scrollHeight;
     });
   }
 
@@ -1125,7 +1130,7 @@
     const bv = chat.querySelector('.boas-vindas');
     if (bv) bv.remove();
 
-    const inicial = tipo === 'kei' ? 'K' : (currentUser ? currentUser.nome[0].toUpperCase() : 'V');
+    const inicial = tipo === 'kei' ? 'K' : (currentUser && currentUser.nome ? currentUser.nome[0].toUpperCase() : 'V');
     const div = document.createElement('div');
     div.className = `msg ${tipo}`;
     div.innerHTML = `

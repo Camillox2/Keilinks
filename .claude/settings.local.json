@@ -25,7 +25,20 @@
       "Bash(curl -s -v -X POST http://localhost:5000/api/chat -H \"Content-Type: application/json\" -d '{\"\"\"\"mensagem\"\"\"\":\"\"\"\"oi\"\"\"\"}')",
       "Bash(curl:*)",
       "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5000 -State Listen | Select-Object LocalPort,OwningProcess\" 2>&1)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(\"d:/Keilinks/venv/Scripts/pip.exe\" install:*)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/importar_datasets.py\" --apenas alpaca 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/importar_datasets.py\" --apenas dolly 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/importar_datasets.py\" --apenas squad 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/importar_datasets.py\" --apenas oasst 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/importar_datasets.py\" --apenas wikipedia 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" -c \"\nfrom datasets import load_dataset\n\ntests = [\n    'Se77en/arc_challenge_pt',\n    'Se77en/MMLU-pro-pt',\n    'Se77en/hellaswag_pt',\n    'Se77en/truthfulqa_mc2_pt',\n    'Se77en/winogrande_pt',\n]\n\nfor nome in tests:\n    try:\n        ds = load_dataset\\(nome, split='train', streaming=True\\)\n        sample = next\\(iter\\(ds\\)\\)\n        print\\(f'OK: {nome} -> {list\\(sample.keys\\(\\)\\)[:8]}'\\)\n    except Exception as e:\n        print\\(f'FAIL: {nome} -> {str\\(e\\)[:100]}'\\)\n\" 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" -c \"\nfrom datasets import load_dataset\nds = load_dataset\\('wikimedia/wikipedia', '20231101.pt', split='train', streaming=True\\)\nsample = next\\(iter\\(ds\\)\\)\nprint\\('OK:', list\\(sample.keys\\(\\)\\)\\)\nprint\\('Title:', sample.get\\('title',''\\)[:50]\\)\nprint\\('Text:', sample.get\\('text',''\\)[:100]\\)\n\" 2>&1)",
+      "Bash(venv/Scripts/python.exe -c \"from datasets import load_dataset; print\\(''datasets OK''\\)\")",
+      "Bash(venv/Scripts/python.exe -u treino/baixar_datasets.py --sem-wiki)",
+      "Bash(venv/Scripts/python.exe -u treino/baixar_datasets.py --apenas wiki --limite 80000)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/gerar_conversacional.py\" 2>&1)",
+      "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/gerar_conversacional.py\" --com-api 2>&1)"
     ]
   }
 }

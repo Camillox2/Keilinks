@@ -24,7 +24,6 @@ def get_conn():
 
 
 def inicializar_banco():
-    """Cria o banco e as tabelas se nao existirem"""
     cfg = DB_CONFIG.copy()
     db_name = cfg.pop('database')
     cfg.pop('cursorclass')
@@ -37,7 +36,6 @@ def inicializar_banco():
     finally:
         conn.close()
 
-    # Agora conecta no banco e cria tabelas
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -101,38 +99,32 @@ def inicializar_banco():
                     FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
-            # Adiciona colunas chat_id e usuario_id na tabela conversas (se nao existirem)
             try:
                 cur.execute("ALTER TABLE conversas ADD COLUMN chat_id INT DEFAULT NULL")
             except pymysql.err.OperationalError:
-                pass  # coluna ja existe
+                pass 
             try:
                 cur.execute("ALTER TABLE conversas ADD COLUMN usuario_id INT DEFAULT NULL")
             except pymysql.err.OperationalError:
-                pass  # coluna ja existe
+                pass
         conn.commit()
         print("[MySQL] Banco e tabelas prontos")
     finally:
         conn.close()
 
 
-# ─── Knowledge CRUD ──────────────────────────────────────────────────────
-
 def knowledge_adicionar(pergunta: str, resposta: str, fonte: str = 'web',
                         categoria: str = 'geral', url: str = None, relevancia: int = 0):
-    """Adiciona fato ao knowledge. Verifica duplicata por pergunta exata antes."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # Checa duplicata exata pela pergunta
             cur.execute(
                 "SELECT id FROM knowledge WHERE pergunta = %s LIMIT 1",
                 (pergunta[:500],)
             )
             if cur.fetchone():
-                return  # Ja existe, nao duplica
+                return
 
-            # Checa duplicata por conteudo similar (primeiros 200 chars da resposta)
             resp_inicio = resposta[:200] if resposta else ''
             if resp_inicio:
                 cur.execute(
@@ -140,7 +132,7 @@ def knowledge_adicionar(pergunta: str, resposta: str, fonte: str = 'web',
                     (resp_inicio,)
                 )
                 if cur.fetchone():
-                    return  # Resposta muito similar ja existe
+                    return
 
             cur.execute(
                 "INSERT INTO knowledge (pergunta, resposta, fonte, categoria, url, relevancia) VALUES (%s, %s, %s, %s, %s, %s)",
@@ -152,7 +144,6 @@ def knowledge_adicionar(pergunta: str, resposta: str, fonte: str = 'web',
 
 
 def knowledge_buscar(pergunta: str, limite: int = 1):
-    """Busca no knowledge usando FULLTEXT do MySQL"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -162,7 +153,6 @@ def knowledge_buscar(pergunta: str, limite: int = 1):
             )
             resultados = cur.fetchall()
             if resultados:
-                # Incrementa acessos
                 cur.execute("UPDATE knowledge SET acessos = acessos + 1 WHERE id = %s", (resultados[0]['id'],))
                 conn.commit()
             return resultados
@@ -171,7 +161,6 @@ def knowledge_buscar(pergunta: str, limite: int = 1):
 
 
 def knowledge_existe(pergunta: str) -> bool:
-    """Verifica se ja existe um fato com mesma pergunta (match exato)"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -195,7 +184,6 @@ def knowledge_total() -> int:
 
 
 def knowledge_por_fonte() -> dict:
-    """Retorna contagem de fatos por fonte"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -204,8 +192,6 @@ def knowledge_por_fonte() -> dict:
     finally:
         conn.close()
 
-
-# ─── Conversas CRUD ──────────────────────────────────────────────────────
 
 def conversa_salvar(pergunta: str, resposta: str, fonte: str = 'desconhecido',
                     chat_id: int = None, usuario_id: int = None):
@@ -217,7 +203,6 @@ def conversa_salvar(pergunta: str, resposta: str, fonte: str = 'desconhecido',
                 (pergunta, resposta, fonte, chat_id, usuario_id)
             )
         conn.commit()
-        # Atualiza updated_at do chat
         if chat_id:
             with conn.cursor() as cur:
                 cur.execute("UPDATE chats SET updated_at = NOW() WHERE id = %s", (chat_id,))
@@ -243,8 +228,6 @@ def conversa_historico(limite: int = 50) -> list:
     finally:
         conn.close()
 
-
-# ─── Crawler Log ─────────────────────────────────────────────────────────
 
 def crawler_log_salvar(fonte: str, topico: str = None, sucesso: bool = True, fatos_novos: int = 0):
     conn = get_conn()
@@ -275,8 +258,6 @@ def crawler_log_recentes(limite: int = 20) -> list:
     finally:
         conn.close()
 
-
-# ─── Memoria CRUD ────────────────────────────────────────────────────────
 
 def memoria_get(chave: str, default=None):
     conn = get_conn()
@@ -312,27 +293,23 @@ def memoria_todos() -> dict:
         conn.close()
 
 
-# ─── Usuarios CRUD ──────────────────────────────────────────────────────
-
 AUTH_SECRET = 'keilinks_secret_2024'
-
 
 def _hash_senha(senha: str) -> str:
     return hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
-
 def _gerar_token(username: str) -> str:
-    return hashlib.sha256((username + AUTH_SECRET).encode('utf-8')).hexdigest()
+    h = hashlib.sha256((username + AUTH_SECRET).encode('utf-8')).hexdigest()
+    return f"{username}::{h}"
 
 
 def usuario_criar(username: str, senha: str, nome: str = None) -> dict | None:
-    """Cria usuario. Retorna dict com id/username/nome/token ou None se ja existe."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT id FROM usuarios WHERE username = %s", (username,))
             if cur.fetchone():
-                return None  # ja existe
+                return None
             senha_hash = _hash_senha(senha)
             cur.execute(
                 "INSERT INTO usuarios (username, senha_hash, nome) VALUES (%s, %s, %s)",
@@ -349,7 +326,6 @@ def usuario_criar(username: str, senha: str, nome: str = None) -> dict | None:
 
 
 def usuario_login(username: str, senha: str) -> dict | None:
-    """Autentica usuario. Retorna dict com id/username/nome/token ou None."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -370,20 +346,21 @@ def usuario_login(username: str, senha: str) -> dict | None:
 
 
 def usuario_por_token(token: str) -> dict | None:
-    """Busca usuario pelo token. Retorna dict com id/username/nome ou None."""
+    if not token or '::' not in token:
+        return None
+    username, assinatura = token.split('::', 1)
+    
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, username, nome FROM usuarios")
-            for user in cur.fetchall():
-                if _gerar_token(user['username']) == token:
-                    return user
+            cur.execute("SELECT id, username, nome FROM usuarios WHERE username = %s", (username,))
+            user = cur.fetchone()
+            if user and _gerar_token(user['username']) == token:
+                return user
         return None
     finally:
         conn.close()
 
-
-# ─── Chats CRUD ─────────────────────────────────────────────────────────
 
 def chat_criar(usuario_id: int, titulo: str = 'Nova conversa') -> dict:
     conn = get_conn()
@@ -425,7 +402,6 @@ def chat_listar(usuario_id: int) -> list:
 
 
 def chat_mensagens(chat_id: int, usuario_id: int) -> list | None:
-    """Retorna mensagens de um chat. None se chat nao pertence ao usuario."""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -470,21 +446,13 @@ def chat_atualizar_titulo(chat_id: int, titulo: str):
         conn.close()
 
 
-# ─── Migracao JSON -> MySQL ──────────────────────────────────────────────
-
 def migrar_json_para_mysql(base_dir: str):
-    """Importa dados dos JSONs existentes para o MySQL"""
     import json
-
-    # Migra knowledge.json
     knowledge_path = os.path.join(base_dir, 'dados', 'knowledge.json')
     if os.path.exists(knowledge_path):
         with open(knowledge_path, 'r', encoding='utf-8') as f:
-            try:
-                fatos = json.load(f)
-            except json.JSONDecodeError:
-                fatos = []
-
+            try: fatos = json.load(f)
+            except: fatos = []
         if fatos:
             conn = get_conn()
             try:
@@ -492,27 +460,16 @@ def migrar_json_para_mysql(base_dir: str):
                     for fato in fatos:
                         cur.execute(
                             "INSERT INTO knowledge (pergunta, resposta, fonte, url) VALUES (%s, %s, %s, %s)",
-                            (
-                                fato.get('pergunta', '')[:500],
-                                fato.get('resposta', ''),
-                                fato.get('fonte', 'web')[:50],
-                                fato.get('url', None),
-                            )
+                            (fato.get('pergunta', '')[:500], fato.get('resposta', ''), fato.get('fonte', 'web')[:50], fato.get('url', None))
                         )
                 conn.commit()
-                print(f"[MySQL] Migrados {len(fatos)} fatos do knowledge.json")
-            finally:
-                conn.close()
+            finally: conn.close()
 
-    # Migra historico.json
     historico_path = os.path.join(base_dir, 'dados', 'historico.json')
     if os.path.exists(historico_path):
         with open(historico_path, 'r', encoding='utf-8') as f:
-            try:
-                historico = json.load(f)
-            except json.JSONDecodeError:
-                historico = []
-
+            try: historico = json.load(f)
+            except: historico = []
         if historico:
             conn = get_conn()
             try:
@@ -523,35 +480,24 @@ def migrar_json_para_mysql(base_dir: str):
                             (h.get('pergunta', ''), h.get('resposta', ''), h.get('fonte', 'desconhecido'))
                         )
                 conn.commit()
-                print(f"[MySQL] Migradas {len(historico)} conversas do historico.json")
-            finally:
-                conn.close()
+            finally: conn.close()
 
-    # Migra memoria.json
     memoria_path = os.path.join(base_dir, 'dados', 'memoria.json')
     if os.path.exists(memoria_path):
         with open(memoria_path, 'r', encoding='utf-8') as f:
-            try:
-                dados = json.load(f)
-            except json.JSONDecodeError:
-                dados = {}
-
+            try: dados = json.load(f)
+            except: dados = {}
         if dados:
             for chave, valor in dados.items():
                 if isinstance(valor, (list, dict)):
                     import json as j
                     memoria_set(chave, j.dumps(valor, ensure_ascii=False))
-                else:
-                    memoria_set(chave, str(valor))
-            print(f"[MySQL] Migradas {len(dados)} chaves de memoria.json")
+                else: memoria_set(chave, str(valor))
 
 
 if __name__ == '__main__':
     import sys
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    print("Inicializando banco MySQL...")
     inicializar_banco()
     if '--migrar' in sys.argv:
-        print("Migrando JSONs para MySQL...")
         migrar_json_para_mysql(base)
-    print("Pronto!")

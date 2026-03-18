@@ -129,9 +129,22 @@ class Reflexao:
 
     def validar_resposta(self, resposta: str) -> bool:
         """Valida se a resposta é aceitável"""
-        if not resposta or len(resposta) < 2:
+        if not resposta or len(resposta) < 5:
             return False
-        # Muita repetição
-        if len(set(resposta.split())) < len(resposta.split()) * 0.2:
+        palavras = resposta.split()
+        # Muito curta
+        if len(palavras) < 3:
+            return False
+        # Muita repetição de palavras
+        unicas = set(p.lower() for p in palavras)
+        if len(unicas) < len(palavras) * 0.3:
+            return False
+        # Comeca com nome proprio aleatorio (sinal de alucinacao)
+        if palavras[0][0].isupper() and palavras[0].lower() not in [
+            'eu', 'voce', 'ele', 'ela', 'sim', 'nao', 'isso', 'cara',
+            'olha', 'mano', 'bom', 'boa', 'tipo', 'vitor', 'keilinks',
+            'python', 'javascript', 'basicamente', 'literalmente',
+        ]:
+            # Provavel alucinacao tipo "Gil Ainda conversa..."
             return False
         return True
