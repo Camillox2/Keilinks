@@ -11,7 +11,13 @@
       "Bash(venv/Scripts/python.exe treino/treinar.py --modelo ultra --passos 200)",
       "Bash(venv/Scripts/python.exe treino/gerar_dados.py)",
       "Bash(powershell -Command \"Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,CPU,WorkingSet64 | Format-Table\")",
-      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo flash)"
+      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo flash)",
+      "Bash(venv/Scripts/python.exe -u treino/treinar.py --modelo padrao)",
+      "Bash(find /d/Keilinks -type f \\\\\\(-name *.html -o -name *.htm -o -name *.css -o -name *.scss -o -name *.less -o -name *.xml -o -name *.json \\\\\\) -not -path */venv/* -not -path */.venv/* -not -path */node_modules/* -not -path */.git/*)",
+      "Bash(tasklist)",
+      "Bash(grep -r import /d/Keilinks/*.py)",
+      "Bash(xargs grep:*)",
+      "Bash(ls -lh /d/Keilinks/dados/*.txt /d/Keilinks/dados/*.json)"
     ]
   }
 }
