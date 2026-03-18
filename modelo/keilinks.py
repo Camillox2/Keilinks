@@ -9,6 +9,7 @@ Modelos disponíveis:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 import math
 
 
@@ -80,6 +81,7 @@ class Keilinks(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.usar_grad_checkpoint = False  # ativado pelo treino quando precisa economizar VRAM
 
         self.embedding_token = nn.Embedding(config['vocab_size'], config['dim'])
         self.embedding_posicao = nn.Embedding(config['contexto_max'], config['dim'])
@@ -114,7 +116,10 @@ class Keilinks(nn.Module):
         pos = torch.arange(T, device=tokens.device).unsqueeze(0)
         x = self.drop_entrada(self.embedding_token(tokens) + self.embedding_posicao(pos))
         for bloco in self.blocos:
-            x = bloco(x)
+            if self.usar_grad_checkpoint and self.training:
+                x = torch_checkpoint(bloco, x, use_reentrant=False)
+            else:
+                x = bloco(x)
         logits = self.cabeca_saida(self.norm_final(x))
         loss = None
         if targets is not None:

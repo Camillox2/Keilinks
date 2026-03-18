@@ -6,7 +6,9 @@
       "Bash(grep -E \"\\\\.txt$|\\\\.json$|\\\\.sql$|requirements|\\\\.env\")",
       "Bash(du -sh /d/Keilinks/*)",
       "Bash(venv/Scripts/pip.exe install:*)",
-      "Bash(venv/Scripts/python.exe -c \":*)"
+      "Bash(venv/Scripts/python.exe -c \":*)",
+      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo flash --passos 300)",
+      "Bash(venv/Scripts/python.exe treino/treinar.py --modelo ultra --passos 200)"
     ]
   }
 }
