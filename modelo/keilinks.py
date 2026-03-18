@@ -145,21 +145,21 @@ class Keilinks(nn.Module):
 CONFIG_FLASH = {
     'nome':         'Keilinks Flash',
     'vocab_size':   8000,
-    'dim':          192,    # menor
+    'dim':          384,
     'num_cabecas':  6,
-    'num_camadas':  4,      # poucos blocos = rápido
-    'dim_ff':       512,
-    'contexto_max': 256,    # contexto menor = mais rápido
+    'num_camadas':  6,
+    'dim_ff':       1024,
+    'contexto_max': 512,
     'dropout':      0.05,
 }
 
 CONFIG_KEILINKS = {
     'nome':         'Keilinks',
     'vocab_size':   8000,
-    'dim':          512,
-    'num_cabecas':  8,
-    'num_camadas':  8,
-    'dim_ff':       1536,
+    'dim':          640,
+    'num_cabecas':  10,
+    'num_camadas':  10,
+    'dim_ff':       1920,
     'contexto_max': 512,
     'dropout':      0.1,
 }
@@ -167,11 +167,11 @@ CONFIG_KEILINKS = {
 CONFIG_ULTRA = {
     'nome':         'Keilinks Ultra',
     'vocab_size':   8000,
-    'dim':          768,    # maior
-    'num_cabecas':  12,
-    'num_camadas':  12,     # mais profundo
-    'dim_ff':       2048,
-    'contexto_max': 1024,   # contexto longo
+    'dim':          896,
+    'num_cabecas':  14,
+    'num_camadas':  14,
+    'dim_ff':       2688,
+    'contexto_max': 1024,
     'dropout':      0.1,
 }
 

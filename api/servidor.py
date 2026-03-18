@@ -1,7 +1,7 @@
 """
-Servidor da Keilinks v6 — Cerebro Completo + MySQL + Fuzzy
-Camadas: Normalizar -> Reflexao -> Retrieval -> Knowledge -> Web -> Modelo -> Fallback
-Auto-aprendizado + Crawler multi-fonte em background + MySQL + Traducao EN>>PT
+Servidor da Keilinks v7 — Cerebro Semantico + Modelo Principal
+Camadas: Normalizar -> Reflexao -> Busca Semantica -> Modelo Neural -> Web -> Fallback
+Auto-aprendizado + Crawler multi-fonte em background + MySQL + Embeddings
 """
 
 import torch
@@ -113,12 +113,15 @@ def inicializar():
         os.path.join(DADOS_DIR, 'aprendizado.txt'),
     )
 
+    # Inicializa busca semantica no knowledge
+    knowledge.iniciar_embeddings()
+
     disponiveis = list(modelos_carregados.keys())
     total_k = knowledge_total()
     fontes = knowledge_por_fonte()
     print(f"\n  Modelos: {disponiveis if disponiveis else 'nenhum'}")
     print(f"  Knowledge: {total_k} fatos {fontes}")
-    print(f"  Retrieval: {len(retrieval.pares)} pares")
+    print(f"  Retrieval: {len(retrieval.pares)} pares (semantico)")
     print(f"\n  http://localhost:5000\n")
 
     # Inicia crawler em background (a cada 5 min)
@@ -267,23 +270,60 @@ def chat():
     fonte = 'desconhecido'
     usou_web = False
     contexto_web = ''
+    contexto_semantico = ''
 
-    # ─── CAMADA 1: Retrieval ──────────────────────────────────────────
-    pensamento.append("Buscando no dataset...")
+    # ─── CAMADA 1: Busca Semantica (retrieval + knowledge) ──────────
+    pensamento.append("Busca semantica...")
     resp_ret, score = retrieval.buscar(mensagem_normalizada)
-    if resp_ret and score >= 0.20:
+
+    if resp_ret and score >= 0.65:
+        # Score alto = resposta direta
         resposta = resp_ret
         fonte = 'retrieval'
-        pensamento.append(f"Encontrei (score {score:.2f})")
+        pensamento.append(f"Match semantico direto (score {score:.2f})")
+    elif resp_ret and score >= 0.20:
+        # Score medio = contexto pro modelo
+        contexto_semantico = resp_ret
+        pensamento.append(f"Contexto semantico (score {score:.2f})")
 
-    # ─── CAMADA 2: Knowledge (MySQL) ─────────────────────────────────
+    # Knowledge semantico
     if not resposta:
-        pensamento.append("Buscando no knowledge...")
         resp_know = knowledge.buscar(mensagem_normalizada)
         if resp_know:
-            resposta = resp_know
-            fonte = 'knowledge'
-            pensamento.append("Encontrei no knowledge")
+            if not contexto_semantico:
+                # Sem contexto do retrieval — usa knowledge direto se nao tem modelo
+                if not modelos_carregados:
+                    resposta = resp_know
+                    fonte = 'knowledge'
+                    pensamento.append("Encontrei no knowledge")
+                else:
+                    contexto_semantico = resp_know
+                    pensamento.append("Knowledge como contexto")
+            else:
+                # Ja tem contexto — concatena
+                contexto_semantico += '\n' + resp_know
+
+    # ─── CAMADA 2: Modelo Neural (cerebro principal) ────────────────
+    if not resposta and modelos_carregados:
+        pensamento.append("Gerando com modelo neural...")
+        # Se tem contexto semantico, injeta no prompt
+        if contexto_semantico:
+            prompt_enriquecido = f"{mensagem_normalizada} (contexto: {contexto_semantico[:200]})"
+        else:
+            prompt_enriquecido = mensagem_normalizada
+
+        resp_modelo = gerar_com_modelo(prompt_enriquecido, tipo, temperatura, max_tokens)
+        if resp_modelo and reflexao.validar_resposta(resp_modelo):
+            resposta = resp_modelo
+            fonte = 'modelo'
+            pensamento.append("Modelo gerou resposta valida")
+        else:
+            pensamento.append("Modelo gerou lixo, descartado")
+            # Se tinha contexto semantico com score razoavel, usa ele
+            if contexto_semantico and resp_ret and score >= 0.30:
+                resposta = resp_ret
+                fonte = 'retrieval'
+                pensamento.append(f"Usando retrieval (score {score:.2f})")
 
     # ─── CAMADA 3: Web ───────────────────────────────────────────────
     if not resposta and (analise['precisa_web'] or analise['tipo'] == 'pergunta_factual'):
@@ -298,18 +338,7 @@ def chat():
             knowledge.adicionar(mensagem, resposta, fonte='web')
             pensamento.append("Encontrei na web e salvei")
 
-    # ─── CAMADA 4: Modelo neural ─────────────────────────────────────
-    if not resposta and modelos_carregados:
-        pensamento.append("Gerando com modelo...")
-        resp_modelo = gerar_com_modelo(mensagem_normalizada, tipo, temperatura, max_tokens)
-        if resp_modelo and reflexao.validar_resposta(resp_modelo):
-            resposta = resp_modelo
-            fonte = 'modelo'
-            pensamento.append("Modelo gerou resposta valida")
-        else:
-            pensamento.append("Modelo gerou lixo, descartado")
-
-    # ─── CAMADA 5: Web forcada ───────────────────────────────────────
+    # ─── CAMADA 4: Web forcada ───────────────────────────────────────
     if not resposta:
         pensamento.append("Buscando na web (ultimo recurso)...")
         resultado = pesquisar(mensagem_normalizada)
@@ -320,7 +349,7 @@ def chat():
             fonte = 'web'
             knowledge.adicionar(mensagem, resposta, fonte='web')
 
-    # ─── CAMADA 6: Fallback ──────────────────────────────────────────
+    # ─── CAMADA 5: Fallback ──────────────────────────────────────────
     if not resposta:
         resposta = "Ainda nao sei sobre isso. Mas vou pesquisar e aprender. Tenta perguntar de outro jeito."
         fonte = 'fallback'

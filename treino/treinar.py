@@ -25,9 +25,9 @@ from dados.tokenizador import Tokenizador
 
 
 CONFIGS_TREINO = {
-    'flash':  {'batch': 24, 'passos': 5000,  'lr_max': 5e-4, 'lr_min': 5e-5},
-    'padrao': {'batch': 12, 'passos': 8000,  'lr_max': 3e-4, 'lr_min': 3e-5},
-    'ultra':  {'batch': 6,  'passos': 12000, 'lr_max': 2e-4, 'lr_min': 2e-5},
+    'flash':  {'batch': 24, 'passos': 10000, 'lr_max': 5e-4, 'lr_min': 5e-5},
+    'padrao': {'batch': 10, 'passos': 15000, 'lr_max': 3e-4, 'lr_min': 3e-5},
+    'ultra':  {'batch': 4,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5},
 }
 
 SAIDAS = {
@@ -59,9 +59,13 @@ def preparar_dados(caminho, tokenizador, contexto):
 
 
 def pegar_batch(data, batch_size, contexto, device):
-    ix = torch.randint(len(data) - contexto, (batch_size,))
-    x = torch.stack([data[i:i+contexto] for i in ix]).to(device)
-    y = torch.stack([data[i+1:i+contexto+1] for i in ix]).to(device)
+    # Adapta contexto se dados forem menores
+    ctx = min(contexto, len(data) - 1)
+    if ctx < 1:
+        raise ValueError(f"Dados muito pequenos ({len(data)} tokens) para treinar. Gere mais dados primeiro.")
+    ix = torch.randint(len(data) - ctx, (batch_size,))
+    x = torch.stack([data[i:i+ctx] for i in ix]).to(device)
+    y = torch.stack([data[i+1:i+ctx+1] for i in ix]).to(device)
     return x, y
 
 
@@ -112,7 +116,19 @@ def treinar(tipo_modelo: str):
     tokenizador.salvar('dados/vocab.json')
 
     treino_data, val_data = preparar_dados(caminho_dados, tokenizador, CONTEXTO)
-    print(f"\n  Treino: {len(treino_data):,} tokens | Val: {len(val_data):,} tokens\n")
+
+    # Adapta contexto se dados forem pequenos demais
+    dados_min = min(len(treino_data), len(val_data))
+    if dados_min <= CONTEXTO:
+        CONTEXTO_REAL = max(dados_min - 1, 32)
+        print(f"\n  AVISO: Dados ({dados_min} tokens) < contexto ({CONTEXTO})")
+        print(f"  Adaptando contexto para {CONTEXTO_REAL}")
+        print(f"  -> Gere mais dados com: python treino/gerar_dados.py\n")
+    else:
+        CONTEXTO_REAL = CONTEXTO
+
+    print(f"\n  Treino: {len(treino_data):,} tokens | Val: {len(val_data):,} tokens")
+    print(f"  Contexto efetivo: {CONTEXTO_REAL}\n")
 
     cfg_modelo['vocab_size'] = tokenizador.tam_vocab
     cfg_modelo['eos_id'] = tokenizador.vocab.get(tokenizador.EOS, 1)
@@ -156,7 +172,7 @@ def treinar(tipo_modelo: str):
         for g in otimizador.param_groups:
             g['lr'] = lr
 
-        x, y = pegar_batch(treino_data, BATCH, CONTEXTO, device)
+        x, y = pegar_batch(treino_data, BATCH, CONTEXTO_REAL, device)
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(device=='cuda')):
             _, loss = modelo(x, y)
 
@@ -166,9 +182,9 @@ def treinar(tipo_modelo: str):
         otimizador.step()
 
         if passo % AVALIAR == 0:
-            loss_val = avaliar(modelo, val_data, BATCH, CONTEXTO, device)
+            loss_val = avaliar(modelo, val_data, BATCH, CONTEXTO_REAL, device)
             elapsed = time.time() - inicio
-            tok_s = (passo * BATCH * CONTEXTO) / max(elapsed, 1)
+            tok_s = (passo * BATCH * CONTEXTO_REAL) / max(elapsed, 1)
             melhor = ''
             if loss_val < melhor_val:
                 melhor_val = loss_val
