@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Keilinks</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -582,6 +583,40 @@
       border: 1px solid var(--border);
       border-top-left-radius: 4px;
       color: var(--text);
+    }
+
+    /* Markdown dentro das mensagens */
+    .bubble p { margin: 4px 0; }
+    .bubble code {
+      background: rgba(124,58,237,0.15);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 13px;
+    }
+    .bubble pre {
+      background: #0d0d15;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 8px 0;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+    .bubble pre code {
+      background: none;
+      padding: 0;
+      font-size: 13px;
+    }
+    .bubble ul, .bubble ol { padding-left: 20px; margin: 4px 0; }
+    .bubble li { margin: 2px 0; }
+    .bubble strong { color: var(--purple2); }
+    .bubble h1, .bubble h2, .bubble h3 { font-size: 15px; margin: 8px 0 4px; color: var(--purple2); }
+    .bubble blockquote {
+      border-left: 3px solid var(--purple);
+      padding-left: 10px;
+      margin: 6px 0;
+      color: var(--muted);
     }
 
     .msg.usr .bubble {
@@ -1196,6 +1231,13 @@
     return div.innerHTML;
   }
 
+  function renderMarkdown(texto) {
+    if (typeof marked !== 'undefined') {
+      try { return marked.parse(texto); } catch { return escapeHtml(texto); }
+    }
+    return escapeHtml(texto);
+  }
+
   function adicionarMsg(texto, tipo, scroll = true) {
     const bv = chat.querySelector('.boas-vindas');
     if (bv) bv.remove();
@@ -1203,11 +1245,12 @@
     const avatarHtml = tipo === 'kei'
       ? '<div class="msg-avatar"><img src="/assets/KeilinksLogo.png" alt="K"></div>'
       : `<div class="msg-avatar">${currentUser && currentUser.nome ? currentUser.nome[0].toUpperCase() : 'V'}</div>`;
+    const conteudo = tipo === 'kei' ? renderMarkdown(texto) : escapeHtml(texto);
     const div = document.createElement('div');
     div.className = `msg ${tipo}`;
     div.innerHTML = `
       ${avatarHtml}
-      <div class="bubble">${escapeHtml(texto)}</div>
+      <div class="bubble">${conteudo}</div>
     `;
     chat.appendChild(div);
     if (scroll) scrollToBottom();
@@ -1290,7 +1333,6 @@
 
     adicionarMsg(texto, 'usr');
     mostrarDigitando();
-    // Pulsa a logo do header enquanto pensa
     const headerAvatar = document.querySelector('.chat-header .avatar');
     if (headerAvatar) headerAvatar.style.animation = 'logoPensando 1.5s ease-in-out infinite';
 
@@ -1303,37 +1345,87 @@
         web_enabled: webEnabled
       };
 
-      const res = await fetch(`${API}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+      // Tenta streaming primeiro, fallback pro modo normal
+      let usouStream = false;
+      try {
+        const streamRes = await fetch(`${API}/api/chat/stream`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
 
-      const data = await res.json();
-      removerDigitando();
+        if (streamRes.ok && streamRes.headers.get('content-type')?.includes('text/event-stream')) {
+          removerDigitando();
+          const msgEl = adicionarMsg('', 'kei');
+          const bubble = msgEl.querySelector('.bubble');
+          let textoAcumulado = '';
 
-      if (data.resposta) {
-        const msgEl = adicionarMsg(data.resposta, 'kei');
-        const badges = [];
-        const f = data.fonte;
-        if (f === 'web')       badges.push(`<span class="badge web">&#x1F310; Pesquisou na web</span>`);
-        if (f === 'knowledge') badges.push(`<span class="badge flash">Aprendido</span>`);
-        if (f === 'modelo')    badges.push(`<span class="badge ultra">${data.modelo}</span>`);
-        if (f === 'retrieval') badges.push(`<span class="badge flash">Base</span>`);
-        if (data.confianca !== undefined) {
-          const cor = data.confianca >= 80 ? '#4ade80' : data.confianca >= 50 ? '#fbbf24' : '#f87171';
-          badges.push(`<span class="badge" style="background:rgba(255,255,255,0.05);color:${cor}">${data.confianca}% confianca</span>`);
+          const reader = streamRes.body.getReader();
+          const decoder = new TextDecoder();
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value);
+            const linhas = chunk.split('\n');
+            for (const linha of linhas) {
+              if (!linha.startsWith('data: ')) continue;
+              try {
+                const evt = JSON.parse(linha.slice(6));
+                if (evt.token) {
+                  textoAcumulado += evt.token;
+                  bubble.innerHTML = renderMarkdown(textoAcumulado);
+                  scrollToBottom();
+                }
+                if (evt.done) {
+                  usouStream = true;
+                  if (textoAcumulado) {
+                    bubble.innerHTML = renderMarkdown(textoAcumulado);
+                    const bdiv = document.createElement('div');
+                    bdiv.innerHTML = `<span class="badge ultra">${modeloAtual}</span>`;
+                    bubble.appendChild(bdiv);
+                  }
+                }
+              } catch {}
+            }
+          }
+          if (textoAcumulado) usouStream = true;
         }
-        if (badges.length) {
-          const bdiv = document.createElement('div');
-          bdiv.innerHTML = badges.join(' ');
-          msgEl.querySelector('.bubble').appendChild(bdiv);
+      } catch {}
+
+      // Fallback: modo normal (busca web, retrieval, etc)
+      if (!usouStream) {
+        const res = await fetch(`${API}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        const data = await res.json();
+        removerDigitando();
+
+        if (data.resposta) {
+          const msgEl = adicionarMsg(data.resposta, 'kei');
+          const badges = [];
+          const f = data.fonte;
+          if (f === 'web')       badges.push(`<span class="badge web">&#x1F310; Pesquisou na web</span>`);
+          if (f === 'knowledge') badges.push(`<span class="badge flash">Aprendido</span>`);
+          if (f === 'modelo')    badges.push(`<span class="badge ultra">${data.modelo}</span>`);
+          if (f === 'retrieval') badges.push(`<span class="badge flash">Base</span>`);
+          if (data.confianca !== undefined) {
+            const cor = data.confianca >= 80 ? '#4ade80' : data.confianca >= 50 ? '#fbbf24' : '#f87171';
+            badges.push(`<span class="badge" style="background:rgba(255,255,255,0.05);color:${cor}">${data.confianca}% confianca</span>`);
+          }
+          if (badges.length) {
+            const bdiv = document.createElement('div');
+            bdiv.innerHTML = badges.join(' ');
+            msgEl.querySelector('.bubble').appendChild(bdiv);
+          }
+        } else {
+          adicionarMsg('Nao consegui processar isso.', 'kei');
         }
-      } else {
-        adicionarMsg('Nao consegui processar isso.', 'kei');
       }
 
-      // Atualiza lista de chats (titulo pode ter mudado)
       carregarChats();
     } catch {
       removerDigitando();

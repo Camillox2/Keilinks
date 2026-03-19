@@ -5,7 +5,9 @@ Modelos disponíveis:
   - Pro   : equilibrado (~275M params, 32K vocab, 2048 ctx)
   - Ultra : mais profundo (~300M params, 32K vocab, 2048 ctx)
 
-KV-Cache: geração 2-3x mais rápida (não recomputa tokens anteriores)
+Recursos:
+  - KV-Cache: geração 2-3x mais rápida
+  - RoPE: posição relativa, generaliza melhor pra contextos longos
 """
 
 import torch
@@ -15,8 +17,28 @@ from torch.utils.checkpoint import checkpoint as torch_checkpoint
 import math
 
 
+# ─── RoPE (Rotary Position Embeddings) ────────────────────────────────────
+
+def _precompute_freqs(dim_cabeca, ctx_max, theta=10000.0):
+    """Pre-computa frequencias pra RoPE (chamado uma vez na init)"""
+    freqs = 1.0 / (theta ** (torch.arange(0, dim_cabeca, 2).float() / dim_cabeca))
+    t = torch.arange(ctx_max).float()
+    freqs = torch.outer(t, freqs)  # (ctx_max, dim_cabeca/2)
+    return torch.polar(torch.ones_like(freqs), freqs)  # complex64
+
+
+def _apply_rope(x, freqs):
+    """Aplica RoPE nos tensores Q e K"""
+    # x: (B, num_cabecas, T, dim_cabeca)
+    B, H, T, D = x.shape
+    x_complex = torch.view_as_complex(x.float().reshape(B, H, T, D // 2, 2))
+    freqs = freqs[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
+    x_rotated = torch.view_as_real(x_complex * freqs.to(x.device)).reshape(B, H, T, D)
+    return x_rotated.type_as(x)
+
+
 class AtencaoMultiCabeca(nn.Module):
-    def __init__(self, dim, num_cabecas, dropout=0.1):
+    def __init__(self, dim, num_cabecas, dropout=0.1, contexto_max=2048):
         super().__init__()
         assert dim % num_cabecas == 0
         self.num_cabecas = num_cabecas
@@ -24,14 +46,21 @@ class AtencaoMultiCabeca(nn.Module):
         self.dropout = dropout
         self.qkv = nn.Linear(dim, 3 * dim, bias=False)
         self.proj_saida = nn.Linear(dim, dim, bias=False)
+        # RoPE frequencies (buffer = salvo no checkpoint mas nao treina)
+        self.register_buffer('rope_freqs', _precompute_freqs(self.dim_cabeca, contexto_max))
 
-    def forward(self, x, kv_cache=None):
+    def forward(self, x, kv_cache=None, pos_offset=0):
         B, T, C = x.shape
         qkv = self.qkv(x).chunk(3, dim=-1)
         Q, K, V = [
             t.view(B, T, self.num_cabecas, self.dim_cabeca).transpose(1, 2)
             for t in qkv
         ]
+
+        # RoPE: aplica rotação posicional em Q e K
+        freqs = self.rope_freqs[pos_offset:pos_offset + T]
+        Q = _apply_rope(Q, freqs)
+        K = _apply_rope(K, freqs)
 
         # KV-Cache: concatena com chaves/valores anteriores
         if kv_cache is not None:
@@ -44,7 +73,7 @@ class AtencaoMultiCabeca(nn.Module):
         x = F.scaled_dot_product_attention(
             Q, K, V,
             dropout_p=self.dropout if self.training else 0.0,
-            is_causal=(kv_cache is None)  # causal so no prefill, no decode ja tem mascara pelo cache
+            is_causal=(kv_cache is None)
         )
         x = x.transpose(1, 2).contiguous().view(B, T, C)
         return self.proj_saida(x), novo_cache
@@ -75,17 +104,17 @@ class RMSNorm(nn.Module):
 
 
 class BlocoTransformer(nn.Module):
-    def __init__(self, dim, num_cabecas, dim_ff, dropout=0.1):
+    def __init__(self, dim, num_cabecas, dim_ff, dropout=0.1, contexto_max=2048):
         super().__init__()
         self.norm1 = RMSNorm(dim)
         self.norm2 = RMSNorm(dim)
-        self.atencao = AtencaoMultiCabeca(dim, num_cabecas, dropout)
+        self.atencao = AtencaoMultiCabeca(dim, num_cabecas, dropout, contexto_max)
         self.ff = FeedForward(dim, dim_ff, dropout)
 
-    def forward(self, x, kv_cache=None):
+    def forward(self, x, kv_cache=None, pos_offset=0):
         residual = x
         x_norm = self.norm1(x)
-        attn_out, novo_cache = self.atencao(x_norm, kv_cache=kv_cache)
+        attn_out, novo_cache = self.atencao(x_norm, kv_cache=kv_cache, pos_offset=pos_offset)
         x = residual + attn_out
         x = x + self.ff(self.norm2(x))
         return x, novo_cache
@@ -96,13 +125,16 @@ class Keilinks(nn.Module):
         super().__init__()
         self.config = config
         self.usar_grad_checkpoint = False
+        ctx_max = config['contexto_max']
 
         self.embedding_token = nn.Embedding(config['vocab_size'], config['dim'])
-        self.embedding_posicao = nn.Embedding(config['contexto_max'], config['dim'])
         self.drop_entrada = nn.Dropout(config['dropout'])
 
+        # Backward compat: carrega embedding_posicao de checkpoints antigos mas nao usa
+        self._tem_rope = True
+
         self.blocos = nn.ModuleList([
-            BlocoTransformer(config['dim'], config['num_cabecas'], config['dim_ff'], config['dropout'])
+            BlocoTransformer(config['dim'], config['num_cabecas'], config['dim_ff'], config['dropout'], ctx_max)
             for _ in range(config['num_camadas'])
         ])
 
@@ -114,7 +146,7 @@ class Keilinks(nn.Module):
 
         n = self._n_params()
         nome = config.get('nome', 'Keilinks')
-        print(f"{nome} — {n/1e6:.1f}M params | {config['num_camadas']} camadas | dim {config['dim']}")
+        print(f"{nome} — {n/1e6:.1f}M params | {config['num_camadas']} camadas | dim {config['dim']} | RoPE")
 
     def _init_pesos(self, m):
         if isinstance(m, nn.Linear):
@@ -127,8 +159,7 @@ class Keilinks(nn.Module):
 
     def forward(self, tokens, targets=None):
         B, T = tokens.shape
-        pos = torch.arange(T, device=tokens.device).unsqueeze(0)
-        x = self.drop_entrada(self.embedding_token(tokens) + self.embedding_posicao(pos))
+        x = self.drop_entrada(self.embedding_token(tokens))
         for bloco in self.blocos:
             if self.usar_grad_checkpoint and self.training:
                 x, _ = torch_checkpoint(bloco, x, use_reentrant=False)
@@ -142,43 +173,39 @@ class Keilinks(nn.Module):
 
     @torch.no_grad()
     def gerar(self, tokens, max_tokens=300, temperatura=0.8, top_p=0.9):
-        """Gera tokens com KV-Cache (2-3x mais rapido)"""
+        """Gera tokens com KV-Cache + RoPE"""
         self.eval()
         ctx_max = self.config['contexto_max']
         eos_id = self.config.get('eos_id', 1)
         num_camadas = len(self.blocos)
 
-        # Prefill: processa todos os tokens de uma vez, guarda cache
+        # Prefill: processa todos os tokens de uma vez
         tokens_in = tokens[:, -ctx_max:]
         B, T = tokens_in.shape
-        pos = torch.arange(T, device=tokens_in.device).unsqueeze(0)
-        x = self.drop_entrada(self.embedding_token(tokens_in) + self.embedding_posicao(pos))
+        x = self.drop_entrada(self.embedding_token(tokens_in))
 
         caches = [None] * num_camadas
         for i, bloco in enumerate(self.blocos):
-            x, caches[i] = bloco(x)
+            x, caches[i] = bloco(x, pos_offset=0)
 
         logits = self.cabeca_saida(self.norm_final(x))
         logits = logits[:, -1, :] / max(temperatura, 1e-8)
 
-        # Amostra primeiro token
         proximo = self._amostrar(logits, top_p)
         if proximo.item() == eos_id:
             return tokens
         tokens = torch.cat([tokens, proximo], dim=1)
         pos_atual = T
 
-        # Decode: um token por vez usando cache
+        # Decode: um token por vez com cache
         for _ in range(max_tokens - 1):
             if pos_atual >= ctx_max:
-                # Contexto estourou — reseta cache e faz prefill de novo
                 return self._gerar_sem_cache(tokens, max_tokens - (pos_atual - T), temperatura, top_p)
 
-            pos = torch.tensor([[pos_atual]], device=tokens.device)
-            x = self.embedding_token(proximo) + self.embedding_posicao(pos)
+            x = self.embedding_token(proximo)
 
             for i, bloco in enumerate(self.blocos):
-                x, caches[i] = bloco(x, kv_cache=caches[i])
+                x, caches[i] = bloco(x, kv_cache=caches[i], pos_offset=pos_atual)
 
             logits = self.cabeca_saida(self.norm_final(x))
             logits = logits[:, -1, :] / max(temperatura, 1e-8)
@@ -199,6 +226,48 @@ class Keilinks(nn.Module):
         probs_ord[cum - probs_ord > top_p] = 0.0
         probs_ord /= probs_ord.sum()
         return idx_ord.gather(-1, torch.multinomial(probs_ord, 1))
+
+    @torch.no_grad()
+    def gerar_stream(self, tokens, max_tokens=300, temperatura=0.8, top_p=0.9):
+        """Gera tokens um por um via yield (pra streaming SSE)"""
+        self.eval()
+        ctx_max = self.config['contexto_max']
+        eos_id = self.config.get('eos_id', 1)
+        num_camadas = len(self.blocos)
+
+        tokens_in = tokens[:, -ctx_max:]
+        B, T = tokens_in.shape
+        x = self.drop_entrada(self.embedding_token(tokens_in))
+
+        caches = [None] * num_camadas
+        for i, bloco in enumerate(self.blocos):
+            x, caches[i] = bloco(x, pos_offset=0)
+
+        logits = self.cabeca_saida(self.norm_final(x))
+        logits = logits[:, -1, :] / max(temperatura, 1e-8)
+
+        proximo = self._amostrar(logits, top_p)
+        if proximo.item() == eos_id:
+            return
+        yield proximo.item()
+        pos_atual = T
+
+        for _ in range(max_tokens - 1):
+            if pos_atual >= ctx_max:
+                return
+
+            x = self.embedding_token(proximo)
+            for i, bloco in enumerate(self.blocos):
+                x, caches[i] = bloco(x, kv_cache=caches[i], pos_offset=pos_atual)
+
+            logits = self.cabeca_saida(self.norm_final(x))
+            logits = logits[:, -1, :] / max(temperatura, 1e-8)
+
+            proximo = self._amostrar(logits, top_p)
+            if proximo.item() == eos_id:
+                return
+            yield proximo.item()
+            pos_atual += 1
 
     def _gerar_sem_cache(self, tokens, max_tokens, temperatura, top_p):
         """Fallback sem cache quando contexto estoura"""

@@ -24,7 +24,7 @@ os.chdir(BASE_DIR)
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 from modelo.keilinks import Keilinks, MODELOS
 from dados.tokenizador import Tokenizador
@@ -105,7 +105,10 @@ def carregar_modelo(tipo):
         tokenizador = Tokenizador(vocab_path)
     ckpt = torch.load(caminho, map_location=device, weights_only=False)
     modelo = Keilinks(ckpt['config']).to(device)
-    modelo.load_state_dict(ckpt['modelo'])
+    # Compat: checkpoints antigos tem embedding_posicao, novos usam RoPE
+    state = ckpt['modelo']
+    state = {k: v for k, v in state.items() if 'embedding_posicao' not in k}
+    modelo.load_state_dict(state, strict=False)
     modelo.eval()
     modelos_carregados[tipo] = modelo
     print(f"  [{tipo.upper()}] ok")
@@ -558,6 +561,74 @@ def chat():
         'pensamento':  pensamento,
         'fonte_web':   contexto_web[:200] if usou_web else None,
     })
+
+
+@app.route('/api/chat/stream', methods=['POST'])
+def chat_stream():
+    """Streaming SSE: envia tokens um a um pro frontend"""
+    dados = request.get_json(force=True) or {}
+    mensagem = dados.get('mensagem', '').strip()
+    tipo = dados.get('modelo', 'flash')
+    temperatura = float(dados.get('temperatura', 0.8))
+    max_tokens = int(dados.get('max_tokens', 200))
+
+    if not mensagem or not modelos_carregados:
+        def err():
+            yield f"data: {json.dumps({'done': True, 'resposta': 'Modelo nao disponivel.'})}\n\n"
+        return Response(stream_with_context(err()), mimetype='text/event-stream')
+
+    modelo = None
+    for t in [tipo, 'flash', 'padrao', 'ultra']:
+        if t in modelos_carregados:
+            modelo = modelos_carregados[t]
+            break
+
+    if not modelo:
+        def err():
+            yield f"data: {json.dumps({'done': True, 'resposta': 'Nenhum modelo carregado.'})}\n\n"
+        return Response(stream_with_context(err()), mimetype='text/event-stream')
+
+    mensagem_normalizada = normalizar(mensagem)
+
+    # Monta prompt
+    partes_ctx = []
+    if PERSONALIDADE_RESUMO:
+        partes_ctx.append(PERSONALIDADE_RESUMO[:200])
+    partes_ctx.append(f"agora: {_montar_contexto_temporal()}")
+    ctx_texto = ' | '.join(partes_ctx)
+    msg_com_ctx = f"{mensagem_normalizada} ({ctx_texto})"
+    prompt = f'<vitor>{msg_com_ctx}<fim><keilinks>'
+
+    tokens_prompt = tokenizador.encode(prompt)
+    cfg = modelo.config if hasattr(modelo, 'config') else {}
+    ctx_max = cfg.get('contexto_max', 512)
+    margem = max_tokens + 20
+    if len(tokens_prompt) > ctx_max - margem:
+        tokens_prompt = tokens_prompt[-(ctx_max - margem):]
+
+    temp_ajustada = min(temperatura, 0.5)
+    tokens_input = torch.tensor([tokens_prompt], dtype=torch.long).to(device)
+
+    def gerar():
+        buffer_tokens = list(tokens_prompt)
+        texto_acumulado = ''
+        for token_id in modelo.gerar_stream(tokens_input, max_tokens=max_tokens, temperatura=temp_ajustada):
+            buffer_tokens.append(token_id)
+            texto_total = tokenizador.decode(buffer_tokens)
+            if '<keilinks>' in texto_total:
+                resp = texto_total.split('<keilinks>')[-1]
+                if '<fim>' in resp:
+                    resp = resp.split('<fim>')[0]
+                    yield f"data: {json.dumps({'token': resp[len(texto_acumulado):], 'done': True})}\n\n"
+                    return
+                novo = resp[len(texto_acumulado):]
+                if novo:
+                    texto_acumulado = resp
+                    yield f"data: {json.dumps({'token': novo})}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return Response(stream_with_context(gerar()), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 @app.route('/api/ensinar', methods=['POST'])

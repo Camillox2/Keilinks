@@ -219,11 +219,15 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
                     min_v = min(old_w.shape[0], novo_vocab)
                     new_w[:min_v] = old_w[:min_v]
                     state[key] = new_w
-            modelo.load_state_dict(state)
+            # Remove embedding_posicao de checkpoints antigos (agora usa RoPE)
+            state = {k: v for k, v in state.items() if 'embedding_posicao' not in k}
+            modelo.load_state_dict(state, strict=False)
             passo_inicial = ckpt['passo']
             print(f"  Retomando do passo {passo_inicial}")
         else:
-            modelo.load_state_dict(ckpt['modelo'])
+            state = ckpt['modelo']
+            state = {k: v for k, v in state.items() if 'embedding_posicao' not in k}
+            modelo.load_state_dict(state, strict=False)
             passo_inicial = ckpt['passo']
             print(f"  Retomando do passo {passo_inicial}")
 
