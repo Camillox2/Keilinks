@@ -37,7 +37,7 @@ from dados.tokenizador import Tokenizador
 # grad_ckpt = ativa gradient checkpointing (troca VRAM por velocidade)
 
 CONFIGS_TREINO = {
-    'flash':  {'batch': 16, 'accum': 1,  'passos': 10000, 'lr_max': 5e-4, 'lr_min': 5e-5, 'grad_ckpt': False},
+    'flash':  {'batch': 8,  'accum': 2,  'passos': 15000, 'lr_max': 3e-4, 'lr_min': 3e-5, 'grad_ckpt': True},
     'padrao': {'batch': 4,  'accum': 4,  'passos': 15000, 'lr_max': 3e-4, 'lr_min': 3e-5, 'grad_ckpt': True},
     'ultra':  {'batch': 1,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True},
 }
@@ -62,11 +62,26 @@ def lr_cosine(passo, total, lr_max, lr_min, warmup):
 
 
 def preparar_dados(caminho, tokenizador, contexto):
+    print("  Tokenizando dados (isso pode demorar na primeira vez)...")
+    t0 = time.time()
+
     with open(caminho, 'r', encoding='utf-8') as f:
-        texto = f.read()
-    tokens = tokenizador.encode(texto)
-    data = torch.tensor(tokens, dtype=torch.long)
+        linhas = f.readlines()
+
+    # Tokeniza em blocos pra mostrar progresso
+    todos_tokens = []
+    bloco = 10000
+    for i in range(0, len(linhas), bloco):
+        chunk = ''.join(linhas[i:i+bloco])
+        todos_tokens.extend(tokenizador.encode(chunk))
+        if (i + bloco) % 50000 == 0 or i + bloco >= len(linhas):
+            elapsed = time.time() - t0
+            pct = min(100, (i + bloco) / len(linhas) * 100)
+            print(f"    {pct:.0f}% — {len(todos_tokens):,} tokens — {elapsed:.0f}s")
+
+    data = torch.tensor(todos_tokens, dtype=torch.long)
     corte = int(0.9 * len(data))
+    print(f"  Tokenização completa: {len(data):,} tokens em {time.time()-t0:.0f}s")
     return data[:corte], data[corte:]
 
 
@@ -97,6 +112,10 @@ def avaliar(modelo, val_data, batch_size, contexto, device, n=10):
 
 def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_override=None):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # Otimizacoes NVIDIA: cudnn benchmark auto-tune kernels pra GPU
+    if device == 'cuda':
+        torch.backends.cudnn.benchmark = True
 
     cfg_treino = CONFIGS_TREINO[tipo_modelo].copy()
     cfg_modelo = MODELOS[tipo_modelo].copy()
@@ -139,7 +158,8 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
     with open(caminho_dados, 'r', encoding='utf-8') as f:
         texto = f.read()
 
-    tokenizador.construir_vocab([texto])
+    vocab_alvo = cfg_modelo.get('vocab_size', 32000)
+    tokenizador.construir_vocab([texto], vocab_alvo=vocab_alvo)
     tokenizador.salvar('dados/vocab.json')
 
     treino_data, val_data = preparar_dados(caminho_dados, tokenizador, CONTEXTO)
@@ -166,6 +186,9 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
     if GRAD_CKPT:
         modelo.usar_grad_checkpoint = True
         print(f"  Gradient checkpointing ATIVADO (economiza ~40% VRAM)")
+
+    # torch.compile nao funciona no Windows (precisa de Triton/Linux)
+    # cudnn.benchmark ja esta ativado acima e da ~5-10% de ganho
 
     # Retoma checkpoint se existir
     passo_inicial = 0

@@ -124,8 +124,8 @@ def inicializar():
     print(f"  Retrieval: {len(retrieval.pares)} pares (semantico)")
     print(f"\n  http://localhost:5000\n")
 
-    # Inicia crawler em background (a cada 5 min)
-    crawler.iniciar()
+    # Crawler desativado — prioridade agora e dados conversacionais, nao factuais
+    # crawler.iniciar()
 
 
 # ─── Utilidades ───────────────────────────────────────────────────────────

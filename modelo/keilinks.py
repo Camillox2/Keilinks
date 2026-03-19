@@ -1,7 +1,7 @@
 """
 Keilinks — IA pessoal do Vitor
 Modelos disponíveis:
-  - Flash : rápido, leve, respostas instantâneas (~8M params)
+  - Flash : principal, conversacional (~72M params, 32K vocab, 2048 ctx)
   - v2    : equilibrado, padrão (~31M params)
   - Ultra : mais profundo, melhor qualidade (~85M params)
 """
@@ -148,13 +148,13 @@ class Keilinks(nn.Module):
 # ─── Configurações dos modelos ─────────────────────────────────────────────
 
 CONFIG_FLASH = {
-    'nome':         'Keilinks Flash',
-    'vocab_size':   8000,
-    'dim':          384,
-    'num_cabecas':  6,
-    'num_camadas':  6,
-    'dim_ff':       1024,
-    'contexto_max': 512,
+    'nome':         'Keilinks Flash v2',
+    'vocab_size':   32000,
+    'dim':          640,
+    'num_cabecas':  10,
+    'num_camadas':  10,
+    'dim_ff':       1760,
+    'contexto_max': 2048,
     'dropout':      0.05,
 }
 

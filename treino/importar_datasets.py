@@ -1,12 +1,16 @@
 """
 Importador de datasets externos para treino da Keilinks
-Baixa Alpaca PT-BR, Dolly PT-BR, e outros datasets do HuggingFace
+Baixa datasets do HuggingFace — factuais e conversacionais
 Salva em conversas.txt (formato treino) + knowledge no MySQL
 
 Uso:
-  python treino/importar_datasets.py                  # importa tudo
-  python treino/importar_datasets.py --apenas alpaca  # so alpaca
-  python treino/importar_datasets.py --apenas dolly   # so dolly
+  python treino/importar_datasets.py                       # importa tudo
+  python treino/importar_datasets.py --apenas alpaca       # so alpaca
+  python treino/importar_datasets.py --apenas oasst2       # OpenAssistant v2 PT
+  python treino/importar_datasets.py --apenas dailydialog  # DailyDialog (traduz)
+  python treino/importar_datasets.py --apenas persona      # Persona-Chat (traduz)
+  python treino/importar_datasets.py --apenas sharegpt_pt  # ShareGPT PT
+  python treino/importar_datasets.py --apenas conversacionais  # todos os 4 acima
 """
 
 import os
@@ -329,12 +333,340 @@ def importar_wikipedia(arquivo):
     print(f"  Wikipedia concluído: {count} pares de treino")
 
 
+# ─── TRADUÇÃO COM GEMINI (grátis) ────────────────────────────────────────────
+
+def _traduzir_batch_gemini(textos, max_retries=2):
+    """Traduz lista de textos EN→PT-BR usando Gemini Flash (gratis)"""
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, '.env'))
+    api_key = os.getenv('GEMINI_API_KEY', '')
+    if not api_key:
+        return textos  # retorna original se nao tem key
+
+    import time
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+
+    # Monta batch de tradução
+    bloco = "\n---\n".join(textos)
+    prompt = (
+        f"Traduza os textos abaixo de inglês para português brasileiro informal. "
+        f"Mantenha o tom casual e natural. Separe cada tradução com ---\n"
+        f"Não adicione explicações, só traduza.\n\n{bloco}"
+    )
+
+    for tentativa in range(max_retries):
+        try:
+            resp = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt
+            )
+            partes = resp.text.split('---')
+            partes = [p.strip() for p in partes if p.strip()]
+
+            # Se o numero de partes bater, retorna
+            if len(partes) == len(textos):
+                return partes
+            # Se nao bateu, tenta traduzir individualmente as que faltam
+            elif len(partes) > 0:
+                # Pega o que deu e completa com original
+                resultado = []
+                for i in range(len(textos)):
+                    if i < len(partes):
+                        resultado.append(partes[i])
+                    else:
+                        resultado.append(textos[i])
+                return resultado
+        except Exception as e:
+            if '429' in str(e) or 'rate' in str(e).lower():
+                time.sleep(10)
+            else:
+                time.sleep(2)
+
+    return textos  # fallback: retorna original
+
+
+# ─── OPENASSISTANT V2 (PT) ──────────────────────────────────────────────────
+
+def importar_oasst2(arquivo):
+    """OpenAssistant v2: conversas reais multi-turno, filtra PT"""
+    print("\n[OASST2] Baixando OpenAssistant v2...")
+
+    try:
+        ds = load_dataset("OpenAssistant/oasst2", split="train")
+    except Exception as e:
+        print(f"  ERRO ao baixar OASST2: {e}")
+        return
+
+    print(f"  {len(ds)} mensagens encontradas, filtrando PT...")
+
+    mensagens = {}
+    for row in ds:
+        msg_id = row.get('message_id', '')
+        parent = row.get('parent_id', None)
+        texto = row.get('text', '')
+        lang = row.get('lang', '')
+
+        mensagens[msg_id] = {
+            'texto': texto,
+            'parent': parent,
+            'lang': lang,
+        }
+
+    count = 0
+    for msg_id, msg in mensagens.items():
+        parent_id = msg['parent']
+        if not parent_id or parent_id not in mensagens:
+            continue
+
+        parent = mensagens[parent_id]
+
+        # Filtra português
+        lang_parent = (parent['lang'] or '').lower()
+        lang_msg = (msg['lang'] or '').lower()
+        if not (lang_parent.startswith('pt') or lang_msg.startswith('pt')):
+            continue
+
+        pergunta = parent['texto'].strip()
+        resposta = msg['texto'].strip()
+
+        if not pergunta or not resposta:
+            continue
+
+        if salvar_par_treino(pergunta, resposta, arquivo):
+            STATS['treino'] += 1
+            count += 1
+
+    print(f"  OASST2 (PT) concluído: {count} pares de treino")
+
+
+# ─── SHAREGPT PORTUGUÊS ─────────────────────────────────────────────────────
+
+def importar_sharegpt_pt(arquivo):
+    """ShareGPT traduzido para português: conversas multi-turno"""
+    print("\n[ShareGPT-PT] Baixando ShareGPT Portuguese...")
+
+    try:
+        ds = load_dataset("FreedomIntelligence/sharegpt-portuguese", split="train")
+    except Exception as e:
+        print(f"  ERRO ao baixar ShareGPT-PT: {e}")
+        return
+
+    print(f"  {len(ds)} conversas encontradas")
+    count = 0
+
+    for row in ds:
+        conversas = row.get('conversations', [])
+        if not conversas:
+            continue
+
+        # Extrai pares user/assistant
+        for i in range(len(conversas) - 1):
+            msg = conversas[i]
+            next_msg = conversas[i + 1]
+
+            role_from = msg.get('from', '') or msg.get('role', '')
+            role_to = next_msg.get('from', '') or next_msg.get('role', '')
+
+            if role_from in ('human', 'user') and role_to in ('gpt', 'assistant'):
+                pergunta = msg.get('value', '') or msg.get('content', '')
+                resposta = next_msg.get('value', '') or next_msg.get('content', '')
+
+                pergunta = pergunta.strip()
+                resposta = resposta.strip()
+
+                if pergunta and resposta:
+                    if salvar_par_treino(pergunta, resposta, arquivo):
+                        STATS['treino'] += 1
+                        count += 1
+
+        if count % 5000 == 0 and count > 0:
+            print(f"  ... {count} pares processados")
+
+    print(f"  ShareGPT-PT concluído: {count} pares de treino")
+
+
+# ─── DAILYDIALOG (traduzido com Gemini) ──────────────────────────────────────
+
+def importar_dailydialog(arquivo):
+    """DailyDialog: 13K diálogos casuais do dia-a-dia, traduzidos EN→PT"""
+    print("\n[DailyDialog] Baixando DailyDialog...")
+
+    try:
+        ds = load_dataset("roskoN/dailydialog", split="train")
+    except Exception:
+        try:
+            ds = load_dataset("benjaminbeilharz/daily_dialog", split="train")
+        except Exception:
+            try:
+                ds = load_dataset("daily_dialog", split="train", trust_remote_code=True)
+            except Exception as e:
+                print(f"  ERRO ao baixar DailyDialog: {e}")
+                return
+
+    print(f"  {len(ds)} diálogos encontrados, traduzindo com Gemini...")
+    count = 0
+    batch_size = 10  # traduz 10 de cada vez
+    buffer_perguntas = []
+    buffer_respostas = []
+    import time
+
+    for row in ds:
+        dialog = row.get('dialog', [])
+        if len(dialog) < 2:
+            continue
+
+        # Cada par consecutivo vira um par de treino
+        for i in range(0, len(dialog) - 1, 2):
+            p = dialog[i].strip()
+            r = dialog[i + 1].strip() if i + 1 < len(dialog) else ''
+            if p and r and len(p) > 3 and len(r) > 3:
+                buffer_perguntas.append(p)
+                buffer_respostas.append(r)
+
+        # Traduz em batch quando acumula o suficiente
+        if len(buffer_perguntas) >= batch_size:
+            try:
+                trad_p = _traduzir_batch_gemini(buffer_perguntas[:batch_size])
+                trad_r = _traduzir_batch_gemini(buffer_respostas[:batch_size])
+
+                for tp, tr in zip(trad_p, trad_r):
+                    if tp and tr:
+                        if salvar_par_treino(tp, tr, arquivo):
+                            STATS['treino'] += 1
+                            count += 1
+
+                buffer_perguntas = buffer_perguntas[batch_size:]
+                buffer_respostas = buffer_respostas[batch_size:]
+                time.sleep(4)  # respeita rate limit Gemini gratis
+
+            except Exception as e:
+                print(f"  Erro tradução: {e}")
+                time.sleep(10)
+                buffer_perguntas = buffer_perguntas[batch_size:]
+                buffer_respostas = buffer_respostas[batch_size:]
+
+        if count % 500 == 0 and count > 0:
+            print(f"  ... {count} pares traduzidos e salvos")
+
+    # Traduz resto do buffer
+    if buffer_perguntas:
+        try:
+            trad_p = _traduzir_batch_gemini(buffer_perguntas)
+            trad_r = _traduzir_batch_gemini(buffer_respostas)
+            for tp, tr in zip(trad_p, trad_r):
+                if tp and tr:
+                    if salvar_par_treino(tp, tr, arquivo):
+                        STATS['treino'] += 1
+                        count += 1
+        except:
+            pass
+
+    print(f"  DailyDialog concluído: {count} pares traduzidos")
+
+
+# ─── PERSONA-CHAT (traduzido com Gemini) ─────────────────────────────────────
+
+def importar_persona(arquivo):
+    """Persona-Chat: 20K conversas com personalidade, traduzidas EN→PT"""
+    print("\n[Persona-Chat] Baixando Persona-Chat...")
+
+    try:
+        ds = load_dataset("google/Synthetic-Persona-Chat", split="train")
+    except Exception:
+        try:
+            ds = load_dataset("bavard/personachat_truecased", split="train")
+        except Exception as e:
+            print(f"  ERRO ao baixar Persona-Chat: {e}")
+            return
+
+    print(f"  {len(ds)} exemplos encontrados, traduzindo com Gemini...")
+    count = 0
+    batch_size = 10
+    buffer_perguntas = []
+    buffer_respostas = []
+    import time
+
+    for row in ds:
+        # Tenta diferentes formatos do dataset
+        hist = row.get('Best Generated Conversation', '') or row.get('history', '')
+        if not hist:
+            # Formato bavard/personachat
+            utterances = row.get('utterances', [])
+            if utterances:
+                last = utterances[-1] if utterances else {}
+                hist_list = last.get('history', [])
+                candidates = last.get('candidates', [])
+                if hist_list and candidates:
+                    pergunta = hist_list[-1] if hist_list else ''
+                    resposta = candidates[-1] if candidates else ''
+                    if pergunta and resposta:
+                        buffer_perguntas.append(pergunta.strip())
+                        buffer_respostas.append(resposta.strip())
+            continue
+
+        # Formato Google Synthetic-Persona-Chat
+        linhas = hist.strip().split('\n')
+        for i in range(0, len(linhas) - 1, 2):
+            p = linhas[i].strip()
+            r = linhas[i + 1].strip() if i + 1 < len(linhas) else ''
+            # Remove prefixos tipo "User: " ou "Bot: "
+            for prefix in ['User:', 'Bot:', 'Person 1:', 'Person 2:', 'A:', 'B:']:
+                p = p.replace(prefix, '').strip()
+                r = r.replace(prefix, '').strip()
+            if p and r and len(p) > 3 and len(r) > 3:
+                buffer_perguntas.append(p)
+                buffer_respostas.append(r)
+
+        # Traduz em batch
+        if len(buffer_perguntas) >= batch_size:
+            try:
+                trad_p = _traduzir_batch_gemini(buffer_perguntas[:batch_size])
+                trad_r = _traduzir_batch_gemini(buffer_respostas[:batch_size])
+
+                for tp, tr in zip(trad_p, trad_r):
+                    if tp and tr:
+                        if salvar_par_treino(tp, tr, arquivo):
+                            STATS['treino'] += 1
+                            count += 1
+
+                buffer_perguntas = buffer_perguntas[batch_size:]
+                buffer_respostas = buffer_respostas[batch_size:]
+                time.sleep(4)
+
+            except Exception as e:
+                print(f"  Erro tradução: {e}")
+                time.sleep(10)
+                buffer_perguntas = buffer_perguntas[batch_size:]
+                buffer_respostas = buffer_respostas[batch_size:]
+
+        if count % 500 == 0 and count > 0:
+            print(f"  ... {count} pares traduzidos e salvos")
+
+    # Traduz resto
+    if buffer_perguntas:
+        try:
+            trad_p = _traduzir_batch_gemini(buffer_perguntas)
+            trad_r = _traduzir_batch_gemini(buffer_respostas)
+            for tp, tr in zip(trad_p, trad_r):
+                if tp and tr:
+                    if salvar_par_treino(tp, tr, arquivo):
+                        STATS['treino'] += 1
+                        count += 1
+        except:
+            pass
+
+    print(f"  Persona-Chat concluído: {count} pares traduzidos")
+
+
 # ─── MAIN ───────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='Importa datasets para treino da Keilinks')
     parser.add_argument('--apenas', type=str, default=None,
-                        help='Importar apenas: alpaca, dolly, squad, oasst, wikipedia')
+                        help='Importar apenas: alpaca, dolly, squad, oasst, wikipedia, '
+                             'oasst2, sharegpt_pt, dailydialog, persona, conversacionais')
     args = parser.parse_args()
 
     datasets_disponiveis = {
@@ -343,13 +675,24 @@ def main():
         'squad': importar_squad,
         'oasst': importar_oasst,
         'wikipedia': importar_wikipedia,
+        # Novos — conversacionais
+        'oasst2': importar_oasst2,
+        'sharegpt_pt': importar_sharegpt_pt,
+        'dailydialog': importar_dailydialog,
+        'persona': importar_persona,
     }
 
+    # Atalho: importar todos os conversacionais de uma vez
+    conversacionais = ['oasst2', 'sharegpt_pt', 'dailydialog', 'persona']
+
     if args.apenas:
-        if args.apenas not in datasets_disponiveis:
-            print(f"Dataset '{args.apenas}' não existe. Opções: {list(datasets_disponiveis.keys())}")
+        if args.apenas == 'conversacionais':
+            selecionados = {k: datasets_disponiveis[k] for k in conversacionais}
+        elif args.apenas not in datasets_disponiveis:
+            print(f"Dataset '{args.apenas}' não existe. Opções: {list(datasets_disponiveis.keys()) + ['conversacionais']}")
             return
-        selecionados = {args.apenas: datasets_disponiveis[args.apenas]}
+        else:
+            selecionados = {args.apenas: datasets_disponiveis[args.apenas]}
     else:
         selecionados = datasets_disponiveis
 
