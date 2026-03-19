@@ -159,9 +159,15 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
     print(f"  Mixed Prec:  bf16" if device == 'cuda' else "  Mixed Prec:  desativado")
     print("=" * 60)
 
-    caminho_dados = 'dados/conversas.txt'
+    # Usa formatadas (com <sistema>) se existir, senão original
+    if os.path.exists('dados/conversas_formatadas.txt'):
+        caminho_dados = 'dados/conversas_formatadas.txt'
+        print(f"  Dados:       conversas_formatadas.txt (com <sistema>)")
+    else:
+        caminho_dados = 'dados/conversas.txt'
+        print(f"  Dados:       conversas.txt (sem <sistema>)")
     if not os.path.exists(caminho_dados):
-        print("\nERRO: 'dados/conversas.txt' nao encontrado.")
+        print("\nERRO: dados de treino nao encontrados.")
         print("Execute primeiro: python treino/gerar_dados.py")
         return
 

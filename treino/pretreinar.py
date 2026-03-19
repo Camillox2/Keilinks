@@ -22,6 +22,7 @@ import time
 import math
 import argparse
 import glob
+import numpy as np
 
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -53,78 +54,131 @@ def lr_cosine(passo, total, lr_max, lr_min, warmup):
     return lr_min + 0.5 * (lr_max - lr_min) * (1 + math.cos(math.pi * p))
 
 
-def carregar_dados_pretreino(tokenizador, contexto, limite_tokens=None):
-    """Carrega e tokeniza todos os arquivos de pré-treino"""
+def tokenizar_para_disco(tokenizador, limite_tokens=None):
+    """
+    Tokeniza todos os arquivos e salva em disco como binários (int32).
+    Usa memmap — não carrega nada na RAM.
+    Retorna (caminho_treino, caminho_val, total_tokens)
+    """
     pasta = 'dados/pretreino'
+    bin_treino = 'dados/pretreino/treino.bin'
+    bin_val    = 'dados/pretreino/val.bin'
+    bin_total  = 'dados/pretreino/total.txt'
+
     if not os.path.exists(pasta):
         print("  ERRO: dados/pretreino/ não encontrado")
         print("  Execute: python treino/baixar_pretreino.py")
-        return None, None
+        return None, None, 0
 
     arquivos = glob.glob(os.path.join(pasta, '*.txt'))
     if not arquivos:
         print("  ERRO: nenhum arquivo .txt em dados/pretreino/")
-        return None, None
+        return None, None, 0
 
     print(f"  Arquivos encontrados: {len(arquivos)}")
     for arq in arquivos:
-        tamanho = os.path.getsize(arq) / 1e6
-        print(f"    {os.path.basename(arq)}: {tamanho:.1f} MB")
+        print(f"    {os.path.basename(arq)}: {os.path.getsize(arq)/1e6:.1f} MB")
 
-    # Tokeniza arquivo por arquivo (streaming pra não estourar RAM)
-    todos_tokens = []
+    # Se já tokenizou antes, reutiliza
+    if os.path.exists(bin_treino) and os.path.exists(bin_val) and os.path.exists(bin_total):
+        with open(bin_total) as f:
+            total = int(f.read().strip())
+        print(f"  Binários encontrados — {total/1e6:.1f}M tokens (reutilizando)")
+        corte = int(0.98 * total)
+        treino = np.memmap(bin_treino, dtype=np.int32, mode='r', shape=(corte,))
+        val    = np.memmap(bin_val,    dtype=np.int32, mode='r', shape=(total - corte,))
+        return treino, val, total
+
+    # Primeira passagem: conta total de tokens pra alocar memmap
+    print("\n  Passo 1/2: contando tokens...")
+    total_tokens = 0
     t0 = time.time()
+    bytes_totais = sum(os.path.getsize(a) for a in arquivos)
+    bytes_lidos  = 0
 
     for arq in arquivos:
-        print(f"\n  Tokenizando {os.path.basename(arq)}...")
-        t1 = time.time()
-
+        nome = os.path.basename(arq)
         with open(arq, 'r', encoding='utf-8', errors='replace') as f:
-            # Lê em chunks de 10MB pra não estourar RAM
-            chunk_size = 10 * 1024 * 1024  # 10MB
-            tokens_arq = 0
-
+            chunk_size = 10 * 1024 * 1024
             while True:
                 chunk = f.read(chunk_size)
                 if not chunk:
                     break
-
-                tokens = tokenizador.encode(chunk)
-                todos_tokens.extend(tokens)
-                tokens_arq += len(tokens)
-
-                if tokens_arq % 5000000 == 0:
-                    print(f"    {tokens_arq/1e6:.1f}M tokens...")
-
-                # Limite de tokens
-                if limite_tokens and len(todos_tokens) >= limite_tokens:
-                    print(f"    Limite de {limite_tokens/1e6:.0f}M tokens atingido")
+                total_tokens += len(tokenizador.encode(chunk))
+                bytes_lidos  += len(chunk.encode('utf-8', errors='replace'))
+                pct = min(bytes_lidos / bytes_totais * 100, 100)
+                print(f"\r    {pct:.1f}% | {total_tokens/1e6:.1f}M tokens | {nome}   ", end='', flush=True)
+                if limite_tokens and total_tokens >= limite_tokens:
+                    total_tokens = limite_tokens
                     break
-
-        print(f"    {os.path.basename(arq)}: {tokens_arq/1e6:.1f}M tokens em {time.time()-t1:.0f}s")
-
-        if limite_tokens and len(todos_tokens) >= limite_tokens:
+        if limite_tokens and total_tokens >= limite_tokens:
             break
 
-    total = len(todos_tokens)
-    print(f"\n  Total: {total/1e6:.1f}M tokens em {time.time()-t0:.0f}s")
+    print()
+    print(f"  Total: {total_tokens/1e6:.1f}M tokens em {time.time()-t0:.0f}s")
 
-    if total < 10000:
-        print("  ERRO: dados insuficientes pra pré-treino")
-        return None, None
+    # Aloca memmap no disco
+    corte = int(0.98 * total_tokens)
+    mm_treino = np.memmap(bin_treino, dtype=np.int32, mode='w+', shape=(corte,))
+    mm_val    = np.memmap(bin_val,    dtype=np.int32, mode='w+', shape=(total_tokens - corte,))
 
-    # Split treino/validação (98/2 — mais dados pra treino no pretreino)
-    data = torch.tensor(todos_tokens, dtype=torch.long)
-    corte = int(0.98 * len(data))
+    # Segunda passagem: escreve tokens direto no memmap
+    print("\n  Passo 2/2: tokenizando para disco...")
+    pos = 0
+    t0 = time.time()
 
-    return data[:corte], data[corte:]
+    for arq in arquivos:
+        nome = os.path.basename(arq)
+        tokens_arq = 0
+        with open(arq, 'r', encoding='utf-8', errors='replace') as f:
+            chunk_size = 10 * 1024 * 1024
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                toks = np.array(tokenizador.encode(chunk), dtype=np.int32)
+                n = len(toks)
+                fim = min(pos + n, total_tokens)
+                bloco = toks[:fim - pos]
+                treino_fim = min(fim, corte)
+                if pos < corte:
+                    mm_treino[pos:treino_fim] = bloco[:treino_fim - pos]
+                if fim > corte:
+                    val_ini = max(pos, corte)
+                    mm_val[val_ini - corte:fim - corte] = bloco[val_ini - pos:]
+                tokens_arq += len(bloco)
+                pos = fim
+                pct = pos / total_tokens * 100
+                elapsed = time.time() - t0
+                tok_s = pos / max(elapsed, 1)
+                eta = (total_tokens - pos) / max(tok_s, 1)
+                print(f"\r    {nome}: {pct:.1f}% | {pos/1e6:.1f}M/{total_tokens/1e6:.1f}M tokens | {tok_s/1e6:.1f}M tok/s | ETA {eta:.0f}s   ", end='', flush=True)
+                if pos >= total_tokens:
+                    break
+        print()
+        print(f"    {nome}: concluído em {time.time()-t0:.0f}s")
+        if pos >= total_tokens:
+            break
+
+    mm_treino.flush()
+    mm_val.flush()
+
+    with open(bin_total, 'w') as f:
+        f.write(str(total_tokens))
+
+    print(f"\n  Salvo em disco: treino={corte/1e6:.1f}M | val={(total_tokens-corte)/1e6:.1f}M tokens")
+
+    treino = np.memmap(bin_treino, dtype=np.int32, mode='r', shape=(corte,))
+    val    = np.memmap(bin_val,    dtype=np.int32, mode='r', shape=(total_tokens - corte,))
+    return treino, val, total_tokens
 
 
 def pegar_batch(data, batch_size, contexto, device):
+    """Pega batch direto do memmap — sem carregar tudo na RAM"""
     ctx = min(contexto, len(data) - 1)
-    ix = torch.randint(len(data) - ctx, (batch_size,))
-    x = torch.stack([data[i:i+ctx] for i in ix]).to(device)
-    y = torch.stack([data[i+1:i+ctx+1] for i in ix]).to(device)
+    ix = np.random.randint(0, len(data) - ctx, size=(batch_size,))
+    x = torch.tensor(np.stack([data[i:i+ctx].astype(np.int64)   for i in ix]), dtype=torch.long).to(device)
+    y = torch.tensor(np.stack([data[i+1:i+ctx+1].astype(np.int64) for i in ix]), dtype=torch.long).to(device)
     return x, y
 
 
@@ -132,9 +186,8 @@ def pegar_batch(data, batch_size, contexto, device):
 def avaliar(modelo, val_data, batch_size, contexto, device, n=10):
     modelo.eval()
     losses = []
-    bs = min(batch_size, max(1, len(val_data) // (contexto + 1)))
     for _ in range(n):
-        x, y = pegar_batch(val_data, bs, contexto, device)
+        x, y = pegar_batch(val_data, batch_size, contexto, device)
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(device == 'cuda')):
             _, loss = modelo(x, y)
         losses.append(loss.item())
@@ -198,8 +251,8 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
     tokenizador.construir_vocab(textos_amostra, vocab_alvo=vocab_alvo)
     tokenizador.salvar('dados/vocab_pretreino.json')
 
-    # Carrega e tokeniza dados
-    treino_data, val_data = carregar_dados_pretreino(tokenizador, CONTEXTO, limite_tokens)
+    # Tokeniza pra disco (memmap) — não carrega na RAM
+    treino_data, val_data, total_tokens = tokenizar_para_disco(tokenizador, limite_tokens)
     if treino_data is None:
         return
 
@@ -208,7 +261,7 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
     print(f"\n  Treino: {len(treino_data)/1e6:.1f}M tokens | Val: {len(val_data)/1e6:.1f}M tokens")
     print(f"  Contexto: {CONTEXTO_REAL}")
     print(f"  Chinchilla ideal pra {cfg_modelo['nome']}: ~5B tokens")
-    print(f"  Seus dados: {len(treino_data)/1e9:.2f}B tokens ({len(treino_data)/5e9*100:.1f}% do ideal)")
+    print(f"  Seus dados: {total_tokens/1e9:.2f}B tokens ({total_tokens/5e9*100:.1f}% do ideal)")
 
     # Modelo
     cfg_modelo['vocab_size'] = tokenizador.tam_vocab
