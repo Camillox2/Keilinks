@@ -47,7 +47,13 @@
       "Bash(git push:*)",
       "Bash(wc:*)",
       "Bash(grep -v \"^$\")",
-      "Bash(shuf)"
+      "Bash(shuf)",
+      "Bash(ls:*)",
+      "Bash(pip install:*)",
+      "Bash(sc query:*)",
+      "Read(//c//**)",
+      "Read(//c/Program Files/MySQL/**)",
+      "Bash(where mysql:*)"
     ]
   }
 }
