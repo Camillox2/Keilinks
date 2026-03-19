@@ -118,7 +118,7 @@ def avaliar(modelo, val_data, batch_size, contexto, device, n=10):
     return avg_loss
 
 
-def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_override=None):
+def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_override=None, usar_pretreino=False):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # Otimizacoes NVIDIA: cudnn benchmark auto-tune kernels pra GPU
@@ -201,11 +201,37 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
     # torch.compile nao funciona no Windows (precisa de Triton/Linux)
     # cudnn.benchmark ja esta ativado acima e da ~5-10% de ganho
 
+    # Carrega checkpoint pré-treinado se --pretreino
+    if usar_pretreino:
+        ckpt_pretreino = f'checkpoints/keilinks_{tipo_modelo}_pretreino.pt'
+        if os.path.exists(ckpt_pretreino):
+            print(f"\n  Carregando modelo PRÉ-TREINADO: {ckpt_pretreino}")
+            ckpt = torch.load(ckpt_pretreino, map_location=device, weights_only=False)
+            state = ckpt['modelo']
+            state = {k: v for k, v in state.items() if 'embedding_posicao' not in k}
+            # Ajusta vocab se mudou
+            novo_vocab = cfg_modelo['vocab_size']
+            for key in ['embedding_token.weight', 'cabeca_saida.weight']:
+                if key in state and state[key].shape[0] != novo_vocab:
+                    old_w = state[key]
+                    new_w = torch.zeros(novo_vocab, old_w.shape[1])
+                    nn.init.normal_(new_w, 0.0, 0.02)
+                    min_v = min(old_w.shape[0], novo_vocab)
+                    new_w[:min_v] = old_w[:min_v]
+                    state[key] = new_w
+            modelo.load_state_dict(state, strict=False)
+            print(f"  Modelo pré-treinado carregado! (passo {ckpt.get('passo', '?')})")
+            print(f"  Agora fine-tuning em dados conversacionais...")
+        else:
+            print(f"\n  AVISO: checkpoint pré-treinado não encontrado: {ckpt_pretreino}")
+            print(f"  Execute primeiro: python treino/pretreinar.py --modelo {tipo_modelo}")
+            print(f"  Continuando do zero...\n")
+
     # Retoma checkpoint se existir
     passo_inicial = 0
     os.makedirs('checkpoints', exist_ok=True)
     ckpt_tmp = f'checkpoints/keilinks_{tipo_modelo}_tmp.pt'
-    if os.path.exists(ckpt_tmp):
+    if not usar_pretreino and os.path.exists(ckpt_tmp):
         ckpt = torch.load(ckpt_tmp, map_location=device, weights_only=False)
         ckpt_vocab = ckpt['config'].get('vocab_size', 0)
         novo_vocab = cfg_modelo['vocab_size']
@@ -344,5 +370,6 @@ if __name__ == '__main__':
     parser.add_argument('--batch', type=int, default=None, help='Batch fisico (override)')
     parser.add_argument('--grad-accum', type=int, default=None, help='Passos de acumulacao (override)')
     parser.add_argument('--passos', type=int, default=None, help='Total de passos (override)')
+    parser.add_argument('--pretreino', action='store_true', help='Carrega checkpoint pre-treinado antes de fine-tune')
     args = parser.parse_args()
-    treinar(args.modelo, batch_override=args.batch, accum_override=args.grad_accum, passos_override=args.passos)
+    treinar(args.modelo, batch_override=args.batch, accum_override=args.grad_accum, passos_override=args.passos, usar_pretreino=args.pretreino)

@@ -52,7 +52,10 @@ dados/crawler_log.json
 dados/historico.json
 dados/conversas.txt
 dados/conversas.txt.backup
+dados/conversas.txt.pre_rebalance
 dados/multiturn.txt
+dados/pretreino/
+dados/vocab_pretreino.json
 
 # Compiled extensions
 *.so

@@ -177,6 +177,20 @@ def texto_eh_lixo(texto):
             return True
     if any(t in texto for t in ['<vitor>', '<keilinks>', '<fim>', '<pad>']):
         return True
+    # Detecta respostas de chatbot generico (aprendidas de datasets ruins)
+    t = texto.lower()
+    frases_chatbot = [
+        'como um modelo de linguagem', 'como modelo de linguagem',
+        'como uma ia', 'como inteligencia artificial',
+        'nao tenho a capacidade', 'sinto muito, mas como',
+        'como posso ajuda-lo', 'como posso ajudá-lo',
+        'nao hesite em perguntar', 'estou aqui para ajudar',
+        'espero ter ajudado', 'posso fornecer mais',
+        'como um assistente', 'minha programacao nao permite',
+        'nao possuo sentimentos', 'nao tenho sentimentos',
+    ]
+    if any(f in t for f in frases_chatbot):
+        return True
     return False
 
 
