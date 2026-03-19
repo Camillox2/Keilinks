@@ -16,18 +16,24 @@ from dados.tokenizador import Tokenizador
 def conversar():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    checkpoint_path = 'checkpoints/keilinks_final.pt'
-    if not os.path.exists(checkpoint_path):
+    # Tenta Flash primeiro, depois final (padrao)
+    for path in ['checkpoints/keilinks_flash.pt', 'checkpoints/keilinks_final.pt', 'checkpoints/keilinks_ultra.pt']:
+        if os.path.exists(path):
+            checkpoint_path = path
+            break
+    else:
         print("Keilinks ainda não foi treinada.")
         print("Execute primeiro: python treino/treinar.py")
         return
 
-    print("Carregando Keilinks...")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    print(f"Carregando Keilinks ({checkpoint_path})...")
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
     tokenizador = Tokenizador('dados/vocab.json')
     modelo = Keilinks(checkpoint['config']).to(device)
-    modelo.load_state_dict(checkpoint['modelo'])
+    # Filtra embedding_posicao de checkpoints antigos (agora usa RoPE)
+    state = {k: v for k, v in checkpoint['modelo'].items() if 'embedding_posicao' not in k}
+    modelo.load_state_dict(state, strict=False)
     modelo.eval()
 
     print("Keilinks online. Digite 'sair' para encerrar.\n")
