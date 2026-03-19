@@ -40,7 +40,12 @@
       "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/gerar_conversacional.py\" 2>&1)",
       "Bash(\"d:/Keilinks/venv/Scripts/python.exe\" \"D:/Keilinks/treino/gerar_conversacional.py\" --com-api 2>&1)",
       "Bash(python:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(wc:*)"
     ]
   }
 }

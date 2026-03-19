@@ -6,6 +6,11 @@ Otimizado pra RTX 5050 (8GB VRAM)
   - Mixed Precision bf16
   - Perplexity no log
 
+Modelos:
+  - Flash: 250M params (batch=2, ~6GB VRAM)
+  - Pro:   275M params (batch=2, ~6GB VRAM)
+  - Ultra: 300M params (batch=1, ~5GB VRAM)
+
 Uso:
   python treino/treinar.py --modelo flash
   python treino/treinar.py --modelo padrao
@@ -37,9 +42,9 @@ from dados.tokenizador import Tokenizador
 # grad_ckpt = ativa gradient checkpointing (troca VRAM por velocidade)
 
 CONFIGS_TREINO = {
-    'flash':  {'batch': 8,  'accum': 2,  'passos': 15000, 'lr_max': 3e-4, 'lr_min': 3e-5, 'grad_ckpt': True},
-    'padrao': {'batch': 4,  'accum': 4,  'passos': 15000, 'lr_max': 3e-4, 'lr_min': 3e-5, 'grad_ckpt': True},
-    'ultra':  {'batch': 1,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True},
+    'flash':  {'batch': 2,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True},
+    'padrao': {'batch': 2,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True},
+    'ultra':  {'batch': 1,  'accum': 16, 'passos': 25000, 'lr_max': 1.5e-4, 'lr_min': 1.5e-5, 'grad_ckpt': True},
 }
 
 SAIDAS = {

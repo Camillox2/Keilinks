@@ -1,7 +1,13 @@
 """
-Servidor da Keilinks v7 — Cerebro Semantico + Modelo Principal
+Servidor da Keilinks v8 — Consciencia + Memoria por Usuario
 Camadas: Normalizar -> Reflexao -> Busca Semantica -> Modelo Neural -> Web -> Fallback
-Auto-aprendizado + Crawler multi-fonte em background + MySQL + Embeddings
+Melhorias v8:
+  1. Historico de conversa no prompt
+  2. Personalidade injetada no prompt
+  3. Memoria ativa no prompt
+  4. Consciencia temporal
+  5. Memoria por usuario
+  6. Auto-avaliacao pos-resposta (3 tentativas)
 """
 
 import torch
@@ -9,7 +15,7 @@ import sys
 import os
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
@@ -37,6 +43,7 @@ from cerebro.crawler import CrawlerBackground
 from cerebro.memoria import Memoria
 from cerebro.reflexao import Reflexao
 from cerebro.normalizador import normalizar
+from cerebro.consciencia import Consciencia
 
 app = Flask(__name__)
 CORS(app)
@@ -46,11 +53,12 @@ modelos_carregados = {}
 tokenizador = None
 
 # ─── Sistemas do Cerebro ──────────────────────────────────────────────────
-retrieval  = Retrieval()
-knowledge  = Knowledge()
-memoria    = Memoria(os.path.join(BASE_DIR, 'dados', 'memoria.json'))
-reflexao   = Reflexao()
-crawler    = CrawlerBackground(intervalo_minutos=5)
+retrieval    = Retrieval()
+knowledge    = Knowledge()
+memoria      = Memoria(os.path.join(BASE_DIR, 'dados', 'memoria.json'))
+reflexao     = Reflexao()
+consciencia  = Consciencia(os.path.join(BASE_DIR, 'dados'))
+crawler      = CrawlerBackground(intervalo_minutos=5)
 
 INTERFACE_DIR   = os.path.join(BASE_DIR, 'interface')
 DADOS_DIR       = os.path.join(BASE_DIR, 'dados')
@@ -59,6 +67,23 @@ APRENDIZADO     = os.path.join(DADOS_DIR, 'aprendizado.txt')
 
 contador_conversas = 0
 RETREINAR_A_CADA = 50
+
+# ─── Personalidade resumida (injetada no prompt) ────────────────────────
+PERSONALIDADE_RESUMO = ""
+_sobre_path = os.path.join(DADOS_DIR, 'sobre_keilinks.txt')
+if os.path.exists(_sobre_path):
+    with open(_sobre_path, 'r', encoding='utf-8') as _f:
+        _linhas = _f.readlines()
+    _partes = []
+    for _l in _linhas:
+        _l = _l.strip()
+        if _l.startswith('#') or not _l:
+            continue
+        if any(kw in _l.lower() for kw in ['nome:', 'criador:', 'sou ', 'direta', 'humor', 'informal', 'girias', 'nao uso', 'honesta']):
+            _partes.append(_l)
+        if len(_partes) >= 8:
+            break
+    PERSONALIDADE_RESUMO = ' | '.join(_partes)
 
 
 # ─── Carregamento ─────────────────────────────────────────────────────────
@@ -89,16 +114,14 @@ def carregar_modelo(tipo):
 
 def inicializar():
     print(f"\n{'='*50}")
-    print(f"  Keilinks v6 — MySQL + Multi-Crawler + Fuzzy")
+    print(f"  Keilinks v8 — Consciencia + Memoria")
     print(f"  Device: {device.upper()}")
     if device == 'cuda':
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
     print(f"{'='*50}\n")
 
-    # Inicializa MySQL
     inicializar_banco()
 
-    # Migra JSONs existentes (so faz algo se tiver dados e tabelas vazias)
     try:
         if knowledge_total() == 0:
             migrar_json_para_mysql(BASE_DIR)
@@ -113,7 +136,6 @@ def inicializar():
         os.path.join(DADOS_DIR, 'aprendizado.txt'),
     )
 
-    # Inicializa busca semantica no knowledge
     knowledge.iniciar_embeddings()
 
     disponiveis = list(modelos_carregados.keys())
@@ -122,9 +144,10 @@ def inicializar():
     print(f"\n  Modelos: {disponiveis if disponiveis else 'nenhum'}")
     print(f"  Knowledge: {total_k} fatos {fontes}")
     print(f"  Retrieval: {len(retrieval.pares)} pares (semantico)")
+    if PERSONALIDADE_RESUMO:
+        print(f"  Personalidade: {len(PERSONALIDADE_RESUMO)} chars")
     print(f"\n  http://localhost:5000\n")
 
-    # Crawler desativado — prioridade agora e dados conversacionais, nao factuais
     # crawler.iniciar()
 
 
@@ -133,36 +156,28 @@ def inicializar():
 def texto_eh_lixo(texto):
     if not texto or len(texto) < 3:
         return True
-    # Muita repeticao de caracteres
     if len(set(texto)) < len(texto) * 0.15:
         return True
     palavras = texto.split()
-    # Palavra unica gigante (sem espacos)
     if len(palavras) < 2 and len(texto) > 20:
         return True
-    # Muitas palavras curtinhas sem sentido
     curtas = sum(1 for p in palavras if len(p) <= 2)
     if len(palavras) > 3 and curtas / len(palavras) > 0.7:
         return True
-    # Frases sem sentido: poucas palavras e nao parece resposta real
     if len(palavras) <= 3 and len(texto) < 25:
-        # Precisa ter pelo menos 2 palavras com 3+ letras
         reais = [p for p in palavras if len(p) >= 3]
         if len(reais) < 2:
             return True
-    # Mesma palavra repetida demais
     if len(palavras) >= 3:
         unicas = set(p.lower() for p in palavras)
         if len(unicas) < max(len(palavras) * 0.6, 2):
             return True
-    # Contem tokens especiais que vazaram
     if any(t in texto for t in ['<vitor>', '<keilinks>', '<fim>', '<pad>']):
         return True
     return False
 
 
 def resposta_eh_relevante(pergunta, resposta):
-    """Checa se a resposta tem relevancia minima com a pergunta"""
     import re
     def _palavras(txt):
         return set(w for w in re.findall(r'[a-z\u00e0-\u00ff]+', txt.lower()) if len(w) >= 3)
@@ -171,15 +186,12 @@ def resposta_eh_relevante(pergunta, resposta):
     r_palavras = _palavras(resposta)
 
     if not p_palavras or not r_palavras:
-        return True  # mensagens curtas, deixa passar
+        return True
 
-    # Overlap direto entre pergunta e resposta
     overlap = p_palavras & r_palavras
     if overlap:
         return True
 
-    # Verifica se resposta contem palavras-chave tematicas da pergunta
-    # (ex: pergunta sobre "python" e resposta fala de "programacao")
     TEMAS = {
         'python': {'programacao', 'codigo', 'linguagem', 'script', 'biblioteca'},
         'javascript': {'programacao', 'codigo', 'web', 'frontend', 'react', 'node'},
@@ -195,15 +207,32 @@ def resposta_eh_relevante(pergunta, resposta):
         if tema in p_palavras and r_palavras & relacionados:
             return True
 
-    # Se nao achou nenhuma conexao — resposta provavelmente e irrelevante
-    # Porem, respostas longas e coerentes podem ser genericas mas ok
     if len(r_palavras) > 15:
-        return True  # respostas longas geralmente tem alguma substancia
+        return True
 
     return False
 
 
-def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200):
+def _montar_contexto_temporal():
+    """Retorna contexto temporal: hora, dia da semana, periodo"""
+    agora = datetime.now()
+    dias = ['segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado', 'domingo']
+    dia_semana = dias[agora.weekday()]
+    hora = agora.hour
+    if 5 <= hora < 12:
+        periodo = 'manha'
+    elif 12 <= hora < 18:
+        periodo = 'tarde'
+    elif 18 <= hora < 22:
+        periodo = 'noite'
+    else:
+        periodo = 'madrugada'
+    return f"{dia_semana}, {agora.strftime('%H:%M')}, {periodo}"
+
+
+def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200,
+                     historico=None, contexto_memoria='', contexto_semantico=''):
+    """Gera resposta com modelo neural + historico + personalidade + memoria + tempo"""
     modelo = None
     tipo_usado = None
     for t in [tipo, 'flash', 'padrao', 'ultra']:
@@ -214,16 +243,42 @@ def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200):
     if not modelo:
         return None
 
-    # Modelos menores precisam de temperatura mais baixa pra nao delirar
     temp_ajustada = min(temperatura, 0.5) if tipo_usado == 'flash' else min(temperatura, 0.6)
 
-    # Tenta gerar ate 2x — se a primeira saida for lixo, tenta com temp mais baixa
-    for tentativa in range(2):
-        temp = temp_ajustada if tentativa == 0 else 0.3
-        prompt = f"<vitor>{mensagem}<fim><keilinks>"
-        tokens = torch.tensor([tokenizador.encode(prompt)], dtype=torch.long).to(device)
+    cfg = modelo.config if hasattr(modelo, 'config') else {}
+    ctx_max = cfg.get('contexto_max', 512)
+
+    # Historico de conversa
+    prompt_historico = ''
+    if historico:
+        for h_p, h_r in historico:
+            prompt_historico += f'<vitor>{h_p}<fim><keilinks>{h_r}<fim>'
+
+    # Contexto extra (personalidade + memoria + tempo + semantico)
+    partes_ctx = []
+    if PERSONALIDADE_RESUMO:
+        partes_ctx.append(PERSONALIDADE_RESUMO[:200])
+    if contexto_memoria:
+        partes_ctx.append(contexto_memoria[:150])
+    partes_ctx.append(f"agora: {_montar_contexto_temporal()}")
+    if contexto_semantico:
+        partes_ctx.append(f"info: {contexto_semantico[:150]}")
+    ctx_texto = ' | '.join(partes_ctx)
+
+    msg_com_ctx = f"{mensagem} ({ctx_texto})" if ctx_texto else mensagem
+    prompt = f'{prompt_historico}<vitor>{msg_com_ctx}<fim><keilinks>'
+
+    tokens_prompt = tokenizador.encode(prompt)
+    margem = max_tokens + 20
+    if len(tokens_prompt) > ctx_max - margem:
+        tokens_prompt = tokens_prompt[-(ctx_max - margem):]
+
+    # Auto-avaliacao: 3 tentativas com temp decrescente
+    temps = [temp_ajustada, temp_ajustada * 0.6, 0.2]
+    for temp in temps:
+        tokens_input = torch.tensor([tokens_prompt], dtype=torch.long).to(device)
         with torch.no_grad():
-            saida = modelo.gerar(tokens, max_tokens=max_tokens, temperatura=temp)
+            saida = modelo.gerar(tokens_input, max_tokens=max_tokens, temperatura=temp)
         texto = tokenizador.decode(saida[0].tolist())
         if '<keilinks>' in texto:
             resp = texto.split('<keilinks>')[-1]
@@ -234,7 +289,8 @@ def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200):
             resp = texto.strip()
 
         if resp and not texto_eh_lixo(resp) and resposta_eh_relevante(mensagem, resp):
-            return resp
+            if reflexao.validar_resposta(resp):
+                return resp
 
     return None
 
@@ -261,11 +317,9 @@ def index():
 
 @app.errorhandler(404)
 def fallback_to_index(e):
-    """SPA fallback — devolve index.html pra qualquer rota GET nao-API"""
     if request.method == 'GET' and not request.path.startswith('/api/'):
         return send_from_directory(INTERFACE_DIR, 'index.html')
     return e
-
 
 
 @app.route('/api/status')
@@ -277,10 +331,8 @@ def status():
             'disponivel': nome in modelos_carregados,
             'params': f"{cfg['num_camadas']} camadas, dim {cfg['dim']}",
         }
-
     total_k = knowledge_total()
     fontes = knowledge_por_fonte()
-
     return jsonify({
         'online':     len(modelos_carregados) > 0,
         'device':     device,
@@ -290,6 +342,7 @@ def status():
         'knowledge_fontes': fontes,
         'retrieval':  len(retrieval.pares),
         'humor':      memoria.dados.get('humor_atual', 'neutro'),
+        'consciencia': consciencia.resumo(),
     })
 
 
@@ -304,8 +357,8 @@ def chat():
     max_tokens  = int(dados.get('max_tokens', 200))
     chat_id     = dados.get('chat_id')
     token       = dados.get('token')
+    web_enabled = dados.get('web_enabled', True)
 
-    # Autenticacao opcional — pega usuario se tiver token
     user = None
     if token:
         user = usuario_por_token(token)
@@ -313,16 +366,46 @@ def chat():
     if not mensagem:
         return jsonify({'erro': 'Mensagem vazia'}), 400
 
-    # ─── NORMALIZACAO (corrige typos, expande abreviacoes) ────────────
     mensagem_original = mensagem
     mensagem_normalizada = normalizar(mensagem)
 
-    # ─── REFLEXAO ─────────────────────────────────────────────────────
+    user_id = user['id'] if user else None
+
     analise = reflexao.analisar(mensagem_normalizada)
     pensamento = []
     if mensagem_normalizada != mensagem_original.lower().strip():
         pensamento.append(f"Entendi: {mensagem_normalizada}")
     pensamento.append(f"Tipo: {analise['tipo']}")
+
+    # ─── HISTORICO DO CHAT ───────────────────────────────────────────
+    historico = []
+    if chat_id and user_id:
+        try:
+            msgs_anteriores = chat_mensagens(chat_id, user_id)
+            if msgs_anteriores:
+                for msg_ant in msgs_anteriores[-5:]:
+                    p = msg_ant.get('pergunta', '')
+                    r = msg_ant.get('resposta', '')
+                    if p and r:
+                        historico.append((p, r))
+                if historico:
+                    pensamento.append(f"Historico: {len(historico)} turnos")
+        except Exception:
+            pass
+
+    # ─── MEMORIA DO USUARIO ──────────────────────────────────────────
+    contexto_memoria = memoria.gerar_contexto(user_id=user_id)
+    if contexto_memoria:
+        pensamento.append(f"Memoria: {contexto_memoria[:60]}...")
+
+    # ─── CONSCIENCIA (antes de responder) ────────────────────────────
+    info_consciencia = consciencia.antes_de_responder(
+        mensagem_normalizada, analise['tipo']
+    )
+    if info_consciencia['feedback']:
+        pensamento.append(f"Feedback: {info_consciencia['feedback']}")
+    if info_consciencia['contexto_emocional']:
+        pensamento.append(f"Emocao: {info_consciencia['contexto_emocional']}")
 
     resposta = None
     fonte = 'desconhecido'
@@ -330,26 +413,22 @@ def chat():
     contexto_web = ''
     contexto_semantico = ''
 
-    # ─── CAMADA 1: Busca Semantica (retrieval + knowledge) ──────────
+    # ─── CAMADA 1: Busca Semantica ───────────────────────────────────
     pensamento.append("Busca semantica...")
     resp_ret, score = retrieval.buscar(mensagem_normalizada)
 
     if resp_ret and score >= 0.50:
-        # Score alto = resposta direta (baixamos de 0.65 pra 0.50 — retrieval e mais confiavel que o modelo)
         resposta = resp_ret
         fonte = 'retrieval'
         pensamento.append(f"Match semantico direto (score {score:.2f})")
     elif resp_ret and score >= 0.20:
-        # Score medio = contexto pro modelo
         contexto_semantico = resp_ret
         pensamento.append(f"Contexto semantico (score {score:.2f})")
 
-    # Knowledge semantico
     if not resposta:
         resp_know = knowledge.buscar(mensagem_normalizada)
         if resp_know:
             if not contexto_semantico:
-                # Sem contexto do retrieval — usa knowledge direto se nao tem modelo
                 if not modelos_carregados:
                     resposta = resp_know
                     fonte = 'knowledge'
@@ -358,33 +437,30 @@ def chat():
                     contexto_semantico = resp_know
                     pensamento.append("Knowledge como contexto")
             else:
-                # Ja tem contexto — concatena
                 contexto_semantico += '\n' + resp_know
 
-    # ─── CAMADA 2: Modelo Neural (cerebro principal) ────────────────
+    # ─── CAMADA 2: Modelo Neural ─────────────────────────────────────
     if not resposta and modelos_carregados:
         pensamento.append("Gerando com modelo neural...")
-        # Se tem contexto semantico, injeta no prompt
-        if contexto_semantico:
-            prompt_enriquecido = f"{mensagem_normalizada} (contexto: {contexto_semantico[:200]})"
-        else:
-            prompt_enriquecido = mensagem_normalizada
-
-        resp_modelo = gerar_com_modelo(prompt_enriquecido, tipo, temperatura, max_tokens)
-        if resp_modelo and reflexao.validar_resposta(resp_modelo):
+        resp_modelo = gerar_com_modelo(
+            mensagem_normalizada, tipo, temperatura, max_tokens,
+            historico=historico,
+            contexto_memoria=contexto_memoria,
+            contexto_semantico=contexto_semantico[:200] if contexto_semantico else '',
+        )
+        if resp_modelo:
             resposta = resp_modelo
             fonte = 'modelo'
             pensamento.append("Modelo gerou resposta valida")
         else:
             pensamento.append("Modelo gerou lixo, descartado")
-            # Fallback: usa retrieval se tinha algo razoavel
             if resp_ret and score >= 0.25:
                 resposta = resp_ret
                 fonte = 'retrieval'
                 pensamento.append(f"Usando retrieval como fallback (score {score:.2f})")
 
     # ─── CAMADA 3: Web ───────────────────────────────────────────────
-    if not resposta and (analise['precisa_web'] or analise['tipo'] == 'pergunta_factual'):
+    if not resposta and web_enabled and (analise['precisa_web'] or analise['tipo'] == 'pergunta_factual'):
         pensamento.append("Pesquisando na web...")
         resultado = pesquisar(analise['topico_extraido'] or mensagem_normalizada)
         if resultado:
@@ -397,7 +473,7 @@ def chat():
             pensamento.append("Encontrei na web e salvei")
 
     # ─── CAMADA 4: Web forcada ───────────────────────────────────────
-    if not resposta:
+    if not resposta and web_enabled:
         pensamento.append("Buscando na web (ultimo recurso)...")
         resultado = pesquisar(mensagem_normalizada)
         if resultado:
@@ -422,20 +498,41 @@ def chat():
 
     # ─── Pos-processamento ───────────────────────────────────────────
 
-    memoria.atualizar(mensagem_original, resposta)
+    # Score de confianca e prefixo de incerteza
+    score_sem = score if resp_ret else 0.0
+    confianca = consciencia.score_confianca(analise['tipo'], fonte, score_sem)
+    pensamento.append(f"Confianca: {confianca}%")
 
-    # So salva pra treino se a resposta faz sentido pro contexto
-    # Nao salva respostas do modelo (podem ser lixo) nem fallback
+    # Adiciona prefixo natural de incerteza quando confianca e baixa
+    if fonte == 'modelo' and confianca < 70:
+        prefixo = consciencia.gerar_prefixo_incerteza(confianca)
+        if prefixo and not resposta.lower().startswith(prefixo.split()[0]):
+            resposta = prefixo + resposta
+
+    # Consciencia pos-resposta (diario, emocao, feedback)
+    sucesso = fonte not in ('fallback',)
+    consciencia.depois_de_responder(
+        mensagem_original, resposta, analise['tipo'], fonte, sucesso
+    )
+
+    memoria.atualizar(mensagem_original, resposta, user_id=user_id)
+
     if fonte in ['retrieval', 'knowledge', 'web']:
         salvar_conversa_txt(mensagem_original, resposta)
         retrieval.adicionar(mensagem_original, resposta)
+        # Auto-treino: salva no conversas.txt pra proximo treino aprender
+        if fonte == 'web':
+            try:
+                conversas_path = os.path.join(DADOS_DIR, 'conversas.txt')
+                with open(conversas_path, 'a', encoding='utf-8') as f:
+                    f.write(f"<vitor>{mensagem_original}<fim><keilinks>{resposta}<fim>\n")
+            except Exception:
+                pass
 
-    # Salva no MySQL (guarda a mensagem original do usuario)
     uid = user['id'] if user else None
     conversa_salvar(mensagem_original, resposta, fonte, chat_id=chat_id, usuario_id=uid)
     contador_conversas += 1
 
-    # Auto-gera titulo do chat na primeira mensagem
     if chat_id and user:
         try:
             msgs = chat_mensagens(chat_id, user['id'])
@@ -445,7 +542,6 @@ def chat():
         except Exception:
             pass
 
-    # Re-treino periodico
     if contador_conversas % RETREINAR_A_CADA == 0:
         threading.Thread(target=retreinar_background, args=(tipo,), daemon=True).start()
 
@@ -454,6 +550,7 @@ def chat():
         'modelo':      tipo if fonte == 'modelo' else None,
         'usou_web':    usou_web,
         'fonte':       fonte,
+        'confianca':   confianca,
         'pensamento':  pensamento,
         'fonte_web':   contexto_web[:200] if usou_web else None,
     })
@@ -474,7 +571,6 @@ def ensinar():
 
 @app.route('/api/crawl', methods=['POST'])
 def crawl_manual():
-    """Forca o crawler a buscar agora"""
     dados = request.get_json(force=True) or {}
     topicos = dados.get('topicos', None)
     novos = crawler.crawl_agora(topicos)
@@ -484,7 +580,6 @@ def crawl_manual():
 # ─── Autenticacao helper ─────────────────────────────────────────────────
 
 def autenticar():
-    """Extrai usuario do token no header ou body. Retorna dict do usuario ou None."""
     token = None
     auth = request.headers.get('Authorization', '')
     if auth.startswith('Bearer '):
@@ -505,18 +600,15 @@ def registrar():
     username = dados.get('username', '').strip().lower()
     senha = dados.get('senha', '').strip()
     nome = dados.get('nome', '').strip() or username
-
     if not username or not senha:
         return jsonify({'erro': 'Username e senha obrigatorios'}), 400
     if len(username) < 3:
         return jsonify({'erro': 'Username precisa ter pelo menos 3 caracteres'}), 400
     if len(senha) < 4:
         return jsonify({'erro': 'Senha precisa ter pelo menos 4 caracteres'}), 400
-
     user = usuario_criar(username, senha, nome)
     if not user:
         return jsonify({'erro': 'Username ja existe'}), 409
-
     return jsonify(user)
 
 
@@ -525,14 +617,11 @@ def login():
     dados = request.get_json(force=True) or {}
     username = dados.get('username', '').strip().lower()
     senha = dados.get('senha', '').strip()
-
     if not username or not senha:
         return jsonify({'erro': 'Username e senha obrigatorios'}), 400
-
     user = usuario_login(username, senha)
     if not user:
         return jsonify({'erro': 'Username ou senha incorretos'}), 401
-
     return jsonify(user)
 
 
@@ -588,12 +677,31 @@ def historico():
 
 @app.route('/api/memoria')
 def ver_memoria():
-    return jsonify(memoria.dados)
+    return jsonify({
+        'global': memoria.dados,
+        'usuarios': len(memoria._usuarios),
+    })
+
+
+@app.route('/api/consciencia')
+def ver_consciencia():
+    """Estado de consciencia da Keilinks: emocao, confianca, diario"""
+    resumo = consciencia.resumo()
+    # Adiciona ultimas entradas do diario
+    diario = []
+    if os.path.exists(consciencia.diario_path):
+        try:
+            with open(consciencia.diario_path, 'r', encoding='utf-8') as f:
+                linhas = f.readlines()
+            diario = [l.strip() for l in linhas[-10:] if l.strip()]
+        except Exception:
+            pass
+    resumo['diario_recente'] = diario
+    return jsonify(resumo)
 
 
 @app.route('/api/crawler-log')
 def ver_crawler_log():
-    """Retorna logs recentes do crawler"""
     try:
         return jsonify(crawler_log_recentes(20))
     except Exception:
