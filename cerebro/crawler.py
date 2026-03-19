@@ -1,5 +1,19 @@
 import requests
+import threading
 from bs4 import BeautifulSoup
+
+
+class CrawlerBackground:
+    def __init__(self, intervalo_minutos=5):
+        self.intervalo_minutos = intervalo_minutos
+        self._thread = None
+
+    def iniciar(self):
+        pass
+
+    def crawl_agora(self, topicos=None):
+        return 0
+
 
 class ExtratorWeb:
     def extrair_texto(self, url):

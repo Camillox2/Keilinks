@@ -53,7 +53,9 @@
       "Bash(sc query:*)",
       "Read(//c//**)",
       "Read(//c/Program Files/MySQL/**)",
-      "Bash(where mysql:*)"
+      "Bash(where mysql:*)",
+      "Bash(d:\\\\Keilinks\\\\venv\\\\Scripts\\\\pip.exe install:*)",
+      "Bash(\"/d/Keilinks/venv/Scripts/pip.exe\" install:*)"
     ]
   }
 }

@@ -62,3 +62,53 @@ class MemoriaLongoPrazo:
                 resultados.append(self.memorias[idx.item()])
                 
         return resultados
+
+
+class Memoria:
+    def __init__(self, caminho='dados/memoria.json'):
+        self.caminho = caminho
+        self.dados = {}
+        self._usuarios = {}
+        self._carregar()
+
+    def _carregar(self):
+        if os.path.exists(self.caminho):
+            try:
+                with open(self.caminho, 'r', encoding='utf-8') as f:
+                    obj = json.load(f)
+                if isinstance(obj, dict):
+                    self.dados = obj.get('global', obj)
+                    self._usuarios = obj.get('usuarios', {})
+            except Exception:
+                pass
+
+    def _salvar(self):
+        os.makedirs(os.path.dirname(self.caminho) or '.', exist_ok=True)
+        with open(self.caminho, 'w', encoding='utf-8') as f:
+            json.dump({'global': self.dados, 'usuarios': self._usuarios}, f, ensure_ascii=False, indent=2)
+
+    def gerar_contexto(self, user_id=None):
+        partes = []
+        if user_id and str(user_id) in self._usuarios:
+            u = self._usuarios[str(user_id)]
+            if u.get('nome'):
+                partes.append(f"usuario: {u['nome']}")
+            if u.get('interesses'):
+                partes.append(f"interesses: {', '.join(u['interesses'][-3:])}")
+        if self.dados.get('humor_atual'):
+            partes.append(f"humor: {self.dados['humor_atual']}")
+        return ' | '.join(partes)
+
+    def atualizar(self, pergunta, resposta, user_id=None):
+        if user_id:
+            uid = str(user_id)
+            if uid not in self._usuarios:
+                self._usuarios[uid] = {'interesses': []}
+            palavras = [w for w in pergunta.lower().split() if len(w) >= 4]
+            if palavras:
+                self._usuarios[uid]['interesses'].extend(palavras[:3])
+                self._usuarios[uid]['interesses'] = self._usuarios[uid]['interesses'][-20:]
+        try:
+            self._salvar()
+        except Exception:
+            pass

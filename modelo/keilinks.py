@@ -181,6 +181,7 @@ class Keilinks(nn.Module):
 
         # Prefill: processa todos os tokens de uma vez
         tokens_in = tokens[:, -ctx_max:]
+        tokens_in = tokens_in.clamp(0, self.config['vocab_size'] - 1)
         B, T = tokens_in.shape
         x = self.drop_entrada(self.embedding_token(tokens_in))
 
@@ -236,6 +237,7 @@ class Keilinks(nn.Module):
         num_camadas = len(self.blocos)
 
         tokens_in = tokens[:, -ctx_max:]
+        tokens_in = tokens_in.clamp(0, self.config['vocab_size'] - 1)
         B, T = tokens_in.shape
         x = self.drop_entrada(self.embedding_token(tokens_in))
 

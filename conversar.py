@@ -3,6 +3,8 @@ import sys
 import os
 import threading
 import time
+import re
+import subprocess
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -12,7 +14,6 @@ from cerebro.consciencia import Consciencia
 from cerebro.memoria import MemoriaLongoPrazo
 from busca.web import BuscadorWeb
 
-# Variáveis globais para controlar o tempo e o acesso à placa de vídeo
 ultima_interacao = time.time()
 gpu_lock = threading.Lock()
 
@@ -22,7 +23,6 @@ def motor_subconsciente(modelo, tokenizador, consciencia, device):
         time.sleep(30)
         agora = time.time()
         
-        # Ativa o subconsciente se não falar com ela há mais de 5 minutos
         if agora - ultima_interacao > 300:
             with gpu_lock:
                 consciencia.emocao.decair()
@@ -54,7 +54,6 @@ def conversar():
             checkpoint_path = path
             break
     else:
-        print("Keilinks ainda não foi treinada. Execute: python treino/treinar.py")
         return
 
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -65,7 +64,6 @@ def conversar():
     modelo.load_state_dict(state, strict=False)
     modelo.eval()
 
-    # Inicializa todos os módulos do cérebro
     consciencia = Consciencia('dados/')
     memoria_longo_prazo = MemoriaLongoPrazo()
     buscador_web = BuscadorWeb()
@@ -73,17 +71,12 @@ def conversar():
     historico_conversa = ""
     ctx_max = checkpoint['config'].get('contexto_max', 2048)
 
-    # Inicia a thread do subconsciente
     thread_pensamento = threading.Thread(target=motor_subconsciente, args=(modelo, tokenizador, consciencia, device), daemon=True)
     thread_pensamento.start()
-
-    print("Keilinks online (Motor Autônomo, RAG e Internet Ativados). Digite 'sair' para encerrar.\n")
-    print("-" * 50)
 
     while True:
         entrada = input("Vitor: ").strip()
         if entrada.lower() in ['sair', 'exit', 'quit']:
-            print("Keilinks: Até mais.")
             break
         if not entrada:
             continue
@@ -93,25 +86,21 @@ def conversar():
         estado_ctx = consciencia.antes_de_responder(entrada, 'chat')
         emocao_txt = estado_ctx['contexto_emocional']
 
-        # 1. Busca memórias antigas relevantes (RAG)
         lembrancas = memoria_longo_prazo.buscar_memoria(entrada, top_k=2)
         contexto_memoria = ""
         if lembrancas:
-            contexto_memoria = " Memórias do passado com o Vitor: " + " | ".join(lembrancas) + "."
+            contexto_memoria = " Memórias do passado: " + " | ".join(lembrancas) + "."
 
-        # 2. Pesquisa na Web em tempo real
         gatilhos_web = ['hoje', 'agora', 'notícia', 'noticias', 'quem ganhou', 'clima', 'tempo em', 'preço do', 'cotação', 'atual']
         precisa_web = any(gatilho in entrada.lower() for gatilho in gatilhos_web)
         
         contexto_web = ""
         if precisa_web:
-            print("  [A Keilinks está pesquisando na web...]")
             resultados_pesquisa = buscador_web.pesquisar(entrada)
             if resultados_pesquisa:
-                contexto_web = f" Informação da internet em tempo real para ajudar na resposta: {resultados_pesquisa}."
+                contexto_web = f" Informação da internet: {resultados_pesquisa}."
 
-        # Injeta as emoções, lembranças e dados da internet no prompt do sistema de forma invisível
-        system_prompt = f"<sistema>Você é Keilinks, a IA pessoal e amigável do Vitor. {emocao_txt}{contexto_memoria}{contexto_web}<fim>"
+        system_prompt = f"<sistema>Você é Keilinks, a IA pessoal do Vitor. Se precisar interagir com o PC dele ou rodar scripts, forneça o comando exato de terminal dentro das tags <executar>comando</executar>. {emocao_txt}{contexto_memoria}{contexto_web}<fim>"
         historico_conversa += f"<vitor>{entrada}<fim><keilinks>"
         prompt_completo = system_prompt + historico_conversa
 
@@ -138,11 +127,25 @@ def conversar():
 
         print(f"Keilinks: {resposta.strip()}\n")
 
-        # 3. Guarda a nova memória para o futuro (se for uma frase de bom tamanho)
+        match = re.search(r'<executar>(.*?)</executar>', resposta, re.DOTALL)
+        if match:
+            comando = match.group(1).strip()
+            confirmar = input(f"[ALERTA] Permitir que Keilinks rode '{comando}'? [S/N]: ")
+            if confirmar.lower() == 's':
+                try:
+                    resultado = subprocess.run(comando, shell=True, capture_output=True, text=True)
+                    saida_cmd = resultado.stdout if resultado.stdout else resultado.stderr
+                    historico_conversa += f"{resposta.strip()}<fim><sistema>Resultado do comando: {saida_cmd[:500]}<fim>"
+                except Exception as e:
+                    historico_conversa += f"{resposta.strip()}<fim><sistema>Erro ao executar: {str(e)}<fim>"
+            else:
+                historico_conversa += f"{resposta.strip()}<fim><sistema>O Vitor negou a permissão.<fim>"
+        else:
+            historico_conversa += f"{resposta.strip()}<fim>"
+
         if len(entrada) > 15:
             threading.Thread(target=memoria_longo_prazo.adicionar_memoria, args=(entrada,)).start()
 
-        historico_conversa += f"{resposta.strip()}<fim>"
         consciencia.depois_de_responder(entrada, resposta.strip(), 'chat', 'modelo', True)
 
 if __name__ == '__main__':
