@@ -50,6 +50,7 @@ checkpoints/
 dados/*.json
 dados/crawler_log.json
 dados/historico.json
+dados/conversas.txt
 
 # Compiled extensions
 *.so
