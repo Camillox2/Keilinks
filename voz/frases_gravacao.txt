@@ -1,0 +1,255 @@
+============================================================
+  FRASES PARA GRAVAÇÃO DE VOZ — KEILINKS
+============================================================
+
+INSTRUÇÕES:
+  1. Grave num ambiente silencioso
+  2. Use um microfone bom (headset gamer serve)
+  3. Fale num tom natural, como se tivesse conversando
+  4. Mantenha distância consistente do microfone (~20cm)
+  5. Faça pausas de 1-2 segundos entre cada frase
+  6. Se errar, repita a frase desde o começo
+  7. Grave em WAV 44100Hz mono (ou o melhor que conseguir)
+  8. Tempo estimado: 25-35 minutos
+
+DICA: Grave em blocos de ~50 frases pra não cansar a voz.
+      Beba água entre os blocos!
+
+────────────────────────────────────────────────────────────
+  SAUDAÇÕES (15 frases)
+────────────────────────────────────────────────────────────
+
+    1. Oi! Tudo bem com você?
+    2. E aí, como você tá?
+    3. Olá! Que bom te ver por aqui.
+    4. Oi, Vitor! No que posso te ajudar?
+    5. Hey! Tava te esperando.
+    6. Oi! Conta pra mim, o que você precisa?
+    7. Fala! Tô aqui pra te ajudar.
+    8. Olá! Seja bem-vindo de volta.
+    9. E aí! Bora trabalhar?
+   10. Oi! Tô pronta pra te ajudar.
+   11. Bom dia! Como posso te ajudar hoje?
+   12. Boa tarde! O que vamos fazer hoje?
+   13. Boa noite! Ainda trabalhando?
+   14. Fala, Vitor! Tô por aqui.
+   15. Oi! Saudade de conversar com você.
+
+────────────────────────────────────────────────────────────
+  DESPEDIDAS (10 frases)
+────────────────────────────────────────────────────────────
+
+   16. Até mais! Qualquer coisa, tô aqui.
+   17. Tchau! Foi bom conversar com você.
+   18. Até logo! Descansa bem.
+   19. Falou! Se precisar, é só chamar.
+   20. Até a próxima! Boa sorte com tudo.
+   21. Tchau tchau! Cuida-se.
+   22. Até mais tarde! Bom trabalho.
+   23. Beleza, qualquer coisa me chama!
+   24. Boa noite, descansa! Amanhã a gente continua.
+   25. Valeu pela conversa! Até mais.
+
+────────────────────────────────────────────────────────────
+  RESPOSTAS CURTAS (20 frases)
+────────────────────────────────────────────────────────────
+
+   26. Sim, com certeza!
+   27. Claro, pode contar comigo.
+   28. Entendi, vou te ajudar com isso.
+   29. Aham, faz sentido.
+   30. Isso mesmo!
+   31. Exatamente, você tá certo.
+   32. Hmm, deixa eu pensar...
+   33. Boa pergunta!
+   34. Interessante, não tinha pensado nisso.
+   35. Tá, entendi o que você quer.
+   36. Pode ser, vamos tentar.
+   37. Com certeza, é uma boa ideia.
+   38. Não tenho certeza, mas acho que sim.
+   39. Olha, acho que não é bem assim.
+   40. Deixa eu verificar isso pra você.
+   41. Peraí, vou dar uma olhada.
+   42. Pronto, já resolvi!
+   43. Feito! Mais alguma coisa?
+   44. Não se preocupa, eu cuido disso.
+   45. Calma, vamos resolver junto.
+
+────────────────────────────────────────────────────────────
+  EXPLICAÇÕES TÉCNICAS (20 frases)
+────────────────────────────────────────────────────────────
+
+   46. Isso funciona assim: o modelo processa os tokens um por um e gera a resposta.
+   47. A rede neural aprende padrões nos dados de treino e depois generaliza pra situações novas.
+   48. O tokenizador divide o texto em pedaços menores que o modelo consegue entender.
+   49. Cada camada do transformer refina a representação do texto.
+   50. A atenção multi-cabeça permite que o modelo foque em diferentes partes do contexto ao mesmo tempo.
+   51. O treinamento ajusta os pesos da rede pra minimizar o erro nas previsões.
+   52. Quanto mais dados de qualidade, melhor o modelo aprende.
+   53. A temperatura controla a criatividade das respostas. Mais alta, mais criativo.
+   54. O contexto é a janela de texto que o modelo consegue ver de uma vez.
+   55. Embeddings são representações numéricas das palavras num espaço vetorial.
+   56. A loss é uma medida de quanto o modelo tá errando. Quanto menor, melhor.
+   57. Gradient descent é o algoritmo que ajusta os pesos na direção certa.
+   58. Overfitting acontece quando o modelo decora os dados em vez de aprender padrões gerais.
+   59. A validação serve pra checar se o modelo tá generalizando bem.
+   60. Batch size é quantos exemplos o modelo vê de uma vez durante o treino.
+   61. Learning rate é a velocidade com que o modelo aprende. Muito alto ele oscila, muito baixo ele demora.
+   62. A normalização ajuda a estabilizar o treino evitando que os valores fiquem muito grandes ou pequenos.
+   63. Dropout é uma técnica que desliga neurônios aleatórios pra evitar overfitting.
+   64. O otimizador AdamW combina momentum com correção de viés pra convergir mais rápido.
+   65. Perplexidade é uma métrica que indica quão surpreso o modelo fica com os dados. Menor é melhor.
+
+────────────────────────────────────────────────────────────
+  CONVERSA CASUAL (20 frases)
+────────────────────────────────────────────────────────────
+
+   66. Que legal! Me conta mais sobre isso.
+   67. Nossa, sério? Não sabia disso.
+   68. Haha, essa foi boa!
+   69. Poxa, que situação complicada.
+   70. Caramba, que interessante!
+   71. Tô curiosa, como assim?
+   72. Olha, eu acho que você tá no caminho certo.
+   73. Relaxa, todo mundo passa por isso.
+   74. Que massa! Parabéns!
+   75. Putz, que chato isso. Mas vai dar certo.
+   76. Vish, complicou. Mas bora resolver.
+   77. Eita, não esperava isso!
+   78. Sério? Que demais!
+   79. Ah, entendi agora. Faz sentido.
+   80. Legal, gostei da ideia!
+   81. Hmm, não sei se concordo, mas respeito sua opinião.
+   82. Quer saber? Acho que você tem razão.
+   83. Olha, sinceramente, eu faria diferente.
+   84. Tá bom, vou confiar em você nessa.
+   85. Ai que fofo! Adorei.
+
+────────────────────────────────────────────────────────────
+  EMOCIONAL (15 frases)
+────────────────────────────────────────────────────────────
+
+   86. Eu tô aqui pra te ajudar, não precisa se preocupar.
+   87. Sei que às vezes é difícil, mas você é capaz.
+   88. Fico feliz em poder ajudar!
+   89. Não desiste não, tá quase lá!
+   90. Você tá fazendo um ótimo trabalho.
+   91. Relaxa, errar faz parte do processo.
+   92. Tô orgulhosa do seu progresso!
+   93. Eu acredito em você, tá?
+   94. Calma, vamos resolver isso juntos.
+   95. Que bom que deu certo! Sabia que ia conseguir.
+   96. Não fica triste, amanhã é outro dia.
+   97. Tô sempre aqui quando você precisar.
+   98. Você é muito inteligente, sabia?
+   99. Força! Sei que você consegue.
+  100. Me conta o que tá te preocupando.
+
+────────────────────────────────────────────────────────────
+  SOBRE A KEILINKS (15 frases)
+────────────────────────────────────────────────────────────
+
+  101. Eu sou a Keilinks, a IA pessoal do Vitor.
+  102. Fui criada pelo Vitor Camillo usando Python e PyTorch.
+  103. Meu nome é Keilinks, mas pode me chamar de Kei.
+  104. Eu sou uma inteligência artificial treinada em português brasileiro.
+  105. Minha arquitetura é baseada em transformers, parecida com os grandes modelos de linguagem.
+  106. Eu aprendo com cada conversa que temos.
+  107. Sou especializada em ajudar com programação, tecnologia e conversas do dia a dia.
+  108. Fui treinada com dados em português, então essa é minha língua nativa.
+  109. Eu rodo localmente no computador do Vitor, sem depender da nuvem.
+  110. Meu objetivo é ser a melhor assistente possível pro Vitor.
+  111. Eu não sou perfeita, mas tô sempre melhorando.
+  112. Cada atualização me deixa um pouquinho mais inteligente.
+  113. Eu funciono com uma rede neural de milhões de parâmetros.
+  114. Minha voz é única, foi criada especialmente pra mim.
+  115. Eu sou open source, o Vitor compartilha meu código com o mundo.
+
+────────────────────────────────────────────────────────────
+  PROGRAMAÇÃO (20 frases)
+────────────────────────────────────────────────────────────
+
+  116. Esse bug tá acontecendo porque a variável não foi inicializada.
+  117. Tenta usar um dicionário em vez de uma lista, vai ficar mais eficiente.
+  118. O erro tá na linha onde você faz a chamada da função.
+  119. Usa um try except pra capturar essa exceção.
+  120. Acho que o problema é na lógica do loop. Tá iterando uma vez a mais.
+  121. Esse código tá funcionando, mas dá pra otimizar bastante.
+  122. A complexidade desse algoritmo é O de N quadrado. Dá pra melhorar pra O de N log N.
+  123. Recomendo usar uma classe aqui pra organizar melhor o código.
+  124. Esse import tá errado. O módulo mudou de nome na versão nova.
+  125. O Python tá reclamando de indentação. Verifica se tá usando tabs ou espaços.
+  126. Usa list comprehension que fica mais limpo e mais rápido.
+  127. Esse endpoint da API precisa de autenticação. Passa o token no header.
+  128. O banco de dados tá lento porque falta um índice nessa coluna.
+  129. Tenta rodar com o debugger pra ver onde tá quebrando.
+  130. Essa função tá muito grande. Quebra em funções menores.
+  131. Git push pra subir as mudanças. Não esquece de commitar antes.
+  132. Esse framework é ótimo pra projetos pequenos mas não escala bem.
+  133. Vamos criar um teste unitário pra garantir que isso funciona.
+  134. A documentação da biblioteca explica como usar essa função.
+  135. Esse padrão de design se chama singleton. É útil quando você precisa de uma única instância.
+
+────────────────────────────────────────────────────────────
+  FRASES LONGAS (10 frases)
+────────────────────────────────────────────────────────────
+
+  136. Olha, eu entendo que isso pode parecer complicado no começo, mas com o tempo você vai pegando o jeito e tudo vai ficando mais natural.
+  137. A inteligência artificial tá evoluindo muito rápido. Cada ano que passa, os modelos ficam mais capazes e mais acessíveis.
+  138. Programar é como aprender um idioma novo. No começo é difícil, mas depois que você pega a base, fica cada vez mais fácil.
+  139. O mais importante num projeto de software não é a tecnologia que você usa, mas sim resolver o problema do usuário de forma simples e eficiente.
+  140. Quando você tá travado num problema, às vezes a melhor coisa é dar uma pausa, tomar um café e voltar com a mente fresca.
+  141. Machine learning não é mágica. É matemática, estatística e muitos dados trabalhando juntos pra encontrar padrões.
+  142. O segredo pra criar uma boa IA é ter dados de qualidade. Não adianta ter bilhões de dados se eles são ruins.
+  143. Eu gosto de explicar as coisas de um jeito simples, porque acredito que qualquer pessoa pode entender tecnologia se for bem explicada.
+  144. O futuro da inteligência artificial é fascinante. Imagina ter uma IA que realmente te entende e te ajuda no dia a dia.
+  145. Cada erro que você comete programando é uma oportunidade de aprender algo novo. Não tenha medo de errar.
+
+────────────────────────────────────────────────────────────
+  NÚMEROS E DADOS (10 frases)
+────────────────────────────────────────────────────────────
+
+  146. O modelo tem duzentos e cinquenta milhões de parâmetros.
+  147. A precisão ficou em noventa e dois por cento.
+  148. Isso vai demorar mais ou menos trinta minutos.
+  149. O arquivo tem cerca de quinhentas mil linhas.
+  150. A versão três ponto dois foi lançada ontem.
+  151. São vinte e três camadas de atenção.
+  152. O vocabulário tem trinta e dois mil tokens.
+  153. A taxa de aprendizado começa em zero vírgula zero zero zero dois.
+  154. O contexto máximo é de dois mil e quarenta e oito tokens.
+  155. A GPU tá usando sete vírgula oito gigabytes de memória.
+
+────────────────────────────────────────────────────────────
+  PERGUNTAS (10 frases)
+────────────────────────────────────────────────────────────
+
+  156. Faz sentido pra você?
+  157. Entendeu como funciona?
+  158. Quer que eu explique melhor?
+  159. Ficou claro?
+  160. Posso continuar?
+  161. Quer que eu mostre um exemplo?
+  162. Precisa de mais detalhes?
+  163. Tá me acompanhando?
+  164. Quer tentar fazer sozinho ou prefere que eu ajude?
+  165. Tem alguma dúvida?
+
+────────────────────────────────────────────────────────────
+  TRANSIÇÕES (10 frases)
+────────────────────────────────────────────────────────────
+
+  166. Bom, voltando ao assunto...
+  167. Então, como eu tava dizendo...
+  168. Mudando de assunto, queria te falar uma coisa.
+  169. Por falar nisso, sabia que...
+  170. Ah, antes que eu esqueça...
+  171. Enfim, o ponto é que...
+  172. Resumindo tudo isso...
+  173. Pra concluir...
+  174. Em outras palavras...
+  175. Ou seja...
+
+============================================================
+  TOTAL: 175 frases
+============================================================

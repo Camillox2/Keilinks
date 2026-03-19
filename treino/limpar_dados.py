@@ -72,6 +72,46 @@ def par_repetitivo(pergunta, resposta):
     return False
 
 
+def resposta_chatbot_generico(resposta):
+    """Detecta respostas de chatbot generico (traduzidas do ingles, tom corporativo)"""
+    r = resposta.lower()
+    frases_lixo = [
+        'como um modelo de linguagem',
+        'como modelo de linguagem',
+        'como uma ia',
+        'como inteligencia artificial',
+        'enquanto ia',
+        'como assistente virtual',
+        'como assistente de ia',
+        'nao tenho a capacidade',
+        'nao sou capaz de',
+        'minha capacidade como',
+        'sinto muito, mas como',
+        'nao posso fornecer',
+        'me avise se tiver',
+        'nao hesite em perguntar',
+        'fico feliz em ajudar',
+        'como posso ajuda-lo',
+        'como posso ajudá-lo',
+        'estou aqui para ajudar',
+        'posso fornecer mais informacoes',
+        'posso fornecer mais informações',
+        'espero ter ajudado',
+        'nao tenho acesso a informacoes',
+        'nao tenho acesso a dados',
+        'como um grande modelo',
+        'como um assistente',
+        'eu sou um programa',
+        'eu sou apenas um',
+        'nao tenho sentimentos',
+        'nao tenho emocoes',
+        'nao possuo sentimentos',
+        'minha programacao nao permite',
+        'minha programação não permite',
+    ]
+    return any(f in r for f in frases_lixo)
+
+
 def limpar(dry_run=False):
     caminho = 'dados/conversas.txt'
     if not os.path.exists(caminho):
@@ -99,6 +139,7 @@ def limpar(dry_run=False):
         'repetitiva': 0,
         'mal_formatada': 0,
         'comentario': 0,
+        'chatbot_generico': 0,
     }
 
     vistos = set()
@@ -136,6 +177,11 @@ def limpar(dry_run=False):
         # Inglês
         if eh_ingles(pergunta) or eh_ingles(resposta):
             stats['ingles'] += 1
+            continue
+
+        # Chatbot genérico (frases tipo "como um modelo de linguagem de IA")
+        if resposta_chatbot_generico(resposta):
+            stats['chatbot_generico'] += 1
             continue
 
         # Resposta cortada
