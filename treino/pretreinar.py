@@ -56,21 +56,23 @@ def lr_cosine(passo, total, lr_max, lr_min, warmup):
 
 def tokenizar_para_disco(tokenizador, limite_tokens=None):
     """
-    Tokeniza todos os arquivos e salva em disco como binários (int32).
-    Usa memmap — não carrega nada na RAM.
-    Retorna (caminho_treino, caminho_val, total_tokens)
+    Tokeniza arquivos pra disco em 1 passagem com checkpoint a cada 100M tokens.
+    Se parar no meio, retoma de onde parou.
     """
+    import json as _json
+
     pasta = 'dados/pretreino'
     bin_treino = 'dados/pretreino/treino.bin'
     bin_val    = 'dados/pretreino/val.bin'
     bin_total  = 'dados/pretreino/total.txt'
+    progress_file = 'dados/pretreino/tokenize_progress.json'
 
     if not os.path.exists(pasta):
         print("  ERRO: dados/pretreino/ não encontrado")
         print("  Execute: python treino/baixar_pretreino.py")
         return None, None, 0
 
-    arquivos = glob.glob(os.path.join(pasta, '*.txt'))
+    arquivos = sorted(glob.glob(os.path.join(pasta, '*.txt')))
     if not arquivos:
         print("  ERRO: nenhum arquivo .txt em dados/pretreino/")
         return None, None, 0
@@ -79,98 +81,172 @@ def tokenizar_para_disco(tokenizador, limite_tokens=None):
     for arq in arquivos:
         print(f"    {os.path.basename(arq)}: {os.path.getsize(arq)/1e6:.1f} MB")
 
-    # Se já tokenizou antes, reutiliza
+    # Se já terminou antes, reutiliza
     if os.path.exists(bin_treino) and os.path.exists(bin_val) and os.path.exists(bin_total):
         with open(bin_total) as f:
             total = int(f.read().strip())
-        print(f"  Binários encontrados — {total/1e6:.1f}M tokens (reutilizando)")
+        print(f"  Binários prontos — {total/1e6:.1f}M tokens (reutilizando)")
         corte = int(0.98 * total)
         treino = np.memmap(bin_treino, dtype=np.int32, mode='r', shape=(corte,))
         val    = np.memmap(bin_val,    dtype=np.int32, mode='r', shape=(total - corte,))
         return treino, val, total
 
-    # Primeira passagem: conta total de tokens pra alocar memmap
-    print("\n  Passo 1/2: contando tokens...")
-    total_tokens = 0
+    # --- Tokenização em 1 passagem com checkpoint ---
+
+    # Carregar progresso anterior (se existir)
+    progress = {}
+    if os.path.exists(progress_file):
+        with open(progress_file, 'r') as f:
+            progress = _json.load(f)
+
+    # Cada arquivo vira um .bin próprio (append)
     t0 = time.time()
     bytes_totais = sum(os.path.getsize(a) for a in arquivos)
-    bytes_lidos  = 0
+    bytes_antes = 0
+    total_tokens_global = 0
+    checkpoint_intervalo = 100_000_000  # salva progresso a cada 100M tokens
+
+    print("\n  Tokenizando para disco (1 passagem, checkpoint a cada 100M tokens)...")
 
     for arq in arquivos:
         nome = os.path.basename(arq)
+        bin_arq = os.path.join(pasta, nome.replace('.txt', '.bin'))
+        arq_size = os.path.getsize(arq)
+
+        # Verificar progresso anterior deste arquivo
+        pos_bytes_inicio = 0
+        tokens_ja_feitos = 0
+        if nome in progress:
+            pos_bytes_inicio = progress[nome]['pos_bytes']
+            tokens_ja_feitos = progress[nome]['tokens']
+            if progress[nome].get('completo', False):
+                print(f"\n  {nome}: já tokenizado ({tokens_ja_feitos/1e6:.1f}M tokens) — pulando")
+                total_tokens_global += tokens_ja_feitos
+                bytes_antes += arq_size
+                continue
+            else:
+                print(f"\n  {nome}: retomando de {pos_bytes_inicio/1e6:.1f}MB ({tokens_ja_feitos/1e6:.1f}M tokens)")
+        else:
+            print(f"\n  {nome}: tokenizando do zero...")
+            # Limpa bin anterior se existir sem progresso
+            if os.path.exists(bin_arq):
+                os.remove(bin_arq)
+
+        tokens_arq = tokens_ja_feitos
+        ultimo_checkpoint = tokens_ja_feitos
+
         with open(arq, 'r', encoding='utf-8', errors='replace') as f:
-            chunk_size = 10 * 1024 * 1024
+            if pos_bytes_inicio > 0:
+                f.seek(pos_bytes_inicio)
+
+            chunk_size = 10 * 1024 * 1024  # 10MB
+            pos_bytes = pos_bytes_inicio
+
             while True:
                 chunk = f.read(chunk_size)
                 if not chunk:
                     break
-                total_tokens += len(tokenizador.encode(chunk))
-                bytes_lidos  += len(chunk.encode('utf-8', errors='replace'))
-                pct = min(bytes_lidos / bytes_totais * 100, 100)
-                print(f"\r    {pct:.1f}% | {total_tokens/1e6:.1f}M tokens | {nome}   ", end='', flush=True)
-                if limite_tokens and total_tokens >= limite_tokens:
-                    total_tokens = limite_tokens
+
+                toks = np.array(tokenizador.encode(chunk), dtype=np.int32)
+
+                # Append no .bin do arquivo
+                with open(bin_arq, 'ab') as fb:
+                    fb.write(toks.tobytes())
+
+                tokens_arq += len(toks)
+                total_tokens_global_agora = (total_tokens_global - tokens_ja_feitos) + tokens_arq
+                pos_bytes += len(chunk.encode('utf-8', errors='replace'))
+
+                # Progresso visual
+                bytes_agora = bytes_antes + pos_bytes
+                pct = min(bytes_agora / bytes_totais * 100, 100)
+                elapsed = time.time() - t0
+                tok_s = max(total_tokens_global_agora / max(elapsed, 1), 1)
+                print(f"\r    {nome}: {pct:.1f}% | {tokens_arq/1e6:.1f}M tokens | {tok_s/1e6:.1f}M tok/s   ", end='', flush=True)
+
+                # Checkpoint a cada 100M tokens
+                if tokens_arq - ultimo_checkpoint >= checkpoint_intervalo:
+                    progress[nome] = {'pos_bytes': pos_bytes, 'tokens': tokens_arq, 'completo': False}
+                    with open(progress_file, 'w') as fp:
+                        _json.dump(progress, fp)
+                    ultimo_checkpoint = tokens_arq
+
+                # Limite de tokens
+                if limite_tokens and (total_tokens_global - tokens_ja_feitos + tokens_arq) >= limite_tokens:
+                    print(f"\n    Limite de {limite_tokens/1e6:.0f}M tokens atingido")
                     break
-        if limite_tokens and total_tokens >= limite_tokens:
+
+        # Marcar arquivo como completo
+        progress[nome] = {'pos_bytes': pos_bytes, 'tokens': tokens_arq, 'completo': True}
+        with open(progress_file, 'w') as fp:
+            _json.dump(progress, fp)
+
+        total_tokens_global = (total_tokens_global - tokens_ja_feitos) + tokens_arq
+        bytes_antes += arq_size
+
+        print(f"\n    {nome}: {tokens_arq/1e6:.1f}M tokens — concluído")
+
+        if limite_tokens and total_tokens_global >= limite_tokens:
             break
 
-    print()
-    print(f"  Total: {total_tokens/1e6:.1f}M tokens em {time.time()-t0:.0f}s")
+    print(f"\n  Total: {total_tokens_global/1e6:.1f}M tokens em {time.time()-t0:.0f}s")
 
-    # Aloca memmap no disco
-    corte = int(0.98 * total_tokens)
+    if total_tokens_global < 10000:
+        print("  ERRO: dados insuficientes")
+        return None, None, 0
+
+    # Combinar .bin de cada arquivo em treino.bin + val.bin
+    print("\n  Combinando em treino.bin + val.bin...")
+    corte = int(0.98 * total_tokens_global)
+
     mm_treino = np.memmap(bin_treino, dtype=np.int32, mode='w+', shape=(corte,))
-    mm_val    = np.memmap(bin_val,    dtype=np.int32, mode='w+', shape=(total_tokens - corte,))
+    mm_val    = np.memmap(bin_val,    dtype=np.int32, mode='w+', shape=(total_tokens_global - corte,))
 
-    # Segunda passagem: escreve tokens direto no memmap
-    print("\n  Passo 2/2: tokenizando para disco...")
     pos = 0
-    t0 = time.time()
-
     for arq in arquivos:
         nome = os.path.basename(arq)
-        tokens_arq = 0
-        with open(arq, 'r', encoding='utf-8', errors='replace') as f:
-            chunk_size = 10 * 1024 * 1024
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                toks = np.array(tokenizador.encode(chunk), dtype=np.int32)
-                n = len(toks)
-                fim = min(pos + n, total_tokens)
-                bloco = toks[:fim - pos]
-                treino_fim = min(fim, corte)
-                if pos < corte:
-                    mm_treino[pos:treino_fim] = bloco[:treino_fim - pos]
-                if fim > corte:
-                    val_ini = max(pos, corte)
-                    mm_val[val_ini - corte:fim - corte] = bloco[val_ini - pos:]
-                tokens_arq += len(bloco)
-                pos = fim
-                pct = pos / total_tokens * 100
-                elapsed = time.time() - t0
-                tok_s = pos / max(elapsed, 1)
-                eta = (total_tokens - pos) / max(tok_s, 1)
-                print(f"\r    {nome}: {pct:.1f}% | {pos/1e6:.1f}M/{total_tokens/1e6:.1f}M tokens | {tok_s/1e6:.1f}M tok/s | ETA {eta:.0f}s   ", end='', flush=True)
-                if pos >= total_tokens:
-                    break
-        print()
-        print(f"    {nome}: concluído em {time.time()-t0:.0f}s")
-        if pos >= total_tokens:
+        bin_arq = os.path.join(pasta, nome.replace('.txt', '.bin'))
+        if not os.path.exists(bin_arq):
+            continue
+
+        n_tokens_arq = os.path.getsize(bin_arq) // 4  # int32 = 4 bytes
+        mm_arq = np.memmap(bin_arq, dtype=np.int32, mode='r', shape=(n_tokens_arq,))
+
+        # Copiar em blocos de 10M tokens pra não estourar RAM
+        bloco_size = 10_000_000
+        for i in range(0, n_tokens_arq, bloco_size):
+            fim_bloco = min(i + bloco_size, n_tokens_arq)
+            bloco = np.array(mm_arq[i:fim_bloco])
+            fim_global = min(pos + len(bloco), total_tokens_global)
+            n = fim_global - pos
+
+            treino_fim = min(pos + n, corte)
+            if pos < corte:
+                qtd_treino = treino_fim - pos
+                mm_treino[pos:treino_fim] = bloco[:qtd_treino]
+            if pos + n > corte:
+                val_ini = max(pos, corte)
+                mm_val[val_ini - corte:pos + n - corte] = bloco[val_ini - pos:n]
+            pos += n
+
+            if pos >= total_tokens_global:
+                break
+
+        del mm_arq
+        if pos >= total_tokens_global:
             break
 
     mm_treino.flush()
     mm_val.flush()
 
     with open(bin_total, 'w') as f:
-        f.write(str(total_tokens))
+        f.write(str(total_tokens_global))
 
-    print(f"\n  Salvo em disco: treino={corte/1e6:.1f}M | val={(total_tokens-corte)/1e6:.1f}M tokens")
+    print(f"  Pronto: treino={corte/1e6:.1f}M | val={(total_tokens_global-corte)/1e6:.1f}M tokens")
 
     treino = np.memmap(bin_treino, dtype=np.int32, mode='r', shape=(corte,))
-    val    = np.memmap(bin_val,    dtype=np.int32, mode='r', shape=(total_tokens - corte,))
-    return treino, val, total_tokens
+    val    = np.memmap(bin_val,    dtype=np.int32, mode='r', shape=(total_tokens_global - corte,))
+    return treino, val, total_tokens_global
 
 
 def pegar_batch(data, batch_size, contexto, device):
