@@ -1,10 +1,12 @@
 """
-Loop de treino da Keilinks v2
+Loop de treino da Keilinks v3
 Otimizado pra RTX 5050 (8GB VRAM)
   - Gradient Accumulation (batch grande sem VRAM extra)
   - Gradient Checkpointing (economiza VRAM nos modelos maiores)
   - Mixed Precision bf16
   - Perplexity no log
+  - Early Stopping (para quando val loss para de melhorar)
+  - Label Smoothing (reduz overfitting)
 
 Modelos:
   - Flash: 250M params (batch=2, ~6GB VRAM)
@@ -42,9 +44,9 @@ from dados.tokenizador import Tokenizador
 # grad_ckpt = ativa gradient checkpointing (troca VRAM por velocidade)
 
 CONFIGS_TREINO = {
-    'flash':  {'batch': 2,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True},
-    'padrao': {'batch': 2,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True},
-    'ultra':  {'batch': 1,  'accum': 16, 'passos': 25000, 'lr_max': 1.5e-4, 'lr_min': 1.5e-5, 'grad_ckpt': True},
+    'flash':  {'batch': 2,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True, 'label_smooth': 0.1},
+    'padrao': {'batch': 2,  'accum': 8,  'passos': 20000, 'lr_max': 2e-4, 'lr_min': 2e-5, 'grad_ckpt': True, 'label_smooth': 0.1},
+    'ultra':  {'batch': 1,  'accum': 16, 'passos': 25000, 'lr_max': 1.5e-4, 'lr_min': 1.5e-5, 'grad_ckpt': True, 'label_smooth': 0.1},
 }
 
 SAIDAS = {
@@ -57,6 +59,7 @@ WARMUP    = 200
 GRAD_CLIP = 1.0
 AVALIAR   = 100
 SALVAR    = 500
+PACIENCIA = 2000  # Early stopping: para se val loss nao melhora por N passos
 
 
 def lr_cosine(passo, total, lr_max, lr_min, warmup):
@@ -132,12 +135,13 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
     LR_MAX    = cfg_treino['lr_max']
     LR_MIN    = cfg_treino['lr_min']
     GRAD_CKPT = cfg_treino['grad_ckpt']
+    LABEL_SMOOTH = cfg_treino.get('label_smooth', 0.0)
     CONTEXTO  = cfg_modelo['contexto_max']
 
     batch_efetivo = BATCH * ACCUM
 
     print("=" * 60)
-    print(f"  Keilinks Treino v2 — Otimizado pra 8GB VRAM")
+    print(f"  Keilinks Treino v3 — Otimizado pra 8GB VRAM")
     print(f"=" * 60)
     print(f"  Modelo:      {cfg_modelo['nome']}")
     print(f"  Device:      {device.upper()}")
@@ -150,6 +154,8 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
     print(f"  Contexto:    {CONTEXTO}")
     print(f"  LR:          {LR_MAX} -> {LR_MIN}")
     print(f"  Grad Ckpt:   {'SIM' if GRAD_CKPT else 'NAO'}")
+    print(f"  Label Smooth: {LABEL_SMOOTH}")
+    print(f"  Early Stop:  paciencia {PACIENCIA} passos")
     print(f"  Mixed Prec:  bf16" if device == 'cuda' else "  Mixed Prec:  desativado")
     print("=" * 60)
 
@@ -235,7 +241,11 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
         modelo.parameters(), lr=LR_MAX, betas=(0.9, 0.95), weight_decay=0.1
     )
 
+    # Label smoothing: suaviza os targets pra evitar overconfidence/overfitting
+    criterio = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTH) if LABEL_SMOOTH > 0 else None
+
     melhor_val = float('inf')
+    passo_melhor = 0  # passo do melhor val loss (pra early stopping)
     inicio = time.time()
 
     print(f"\n  Iniciando treino...\n")
@@ -252,8 +262,13 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
         for micro in range(ACCUM):
             x, y = pegar_batch(treino_data, BATCH, CONTEXTO_REAL, device)
             with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(device == 'cuda')):
-                _, loss = modelo(x, y)
-                loss_escalonada = loss / ACCUM  # normaliza pelo numero de acumulacoes
+                logits, _ = modelo(x, y)
+                # Usa label smoothing se configurado, senao cross_entropy padrao
+                if criterio is not None:
+                    loss = criterio(logits.view(-1, logits.size(-1)), y.view(-1))
+                else:
+                    loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
+                loss_escalonada = loss / ACCUM
 
             loss_escalonada.backward()
             loss_acum += loss.item()
@@ -266,13 +281,14 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
         # ─── Avaliacao ────────────────────────────────────────────────
         if passo % AVALIAR == 0:
             loss_val = avaliar(modelo, val_data, BATCH, CONTEXTO_REAL, device)
-            perplexity = math.exp(min(loss_val, 20))  # cap pra nao explodir
+            perplexity = math.exp(min(loss_val, 20))
             elapsed = time.time() - inicio
             tok_s = (passo * batch_efetivo * CONTEXTO_REAL) / max(elapsed, 1)
             melhor = ''
 
             if loss_val < melhor_val:
                 melhor_val = loss_val
+                passo_melhor = passo
                 torch.save({'passo': passo, 'modelo': modelo.state_dict(), 'config': cfg_modelo},
                            SAIDAS[tipo_modelo].replace('.pt', '_melhor.pt'))
                 melhor = ' *MELHOR*'
@@ -285,6 +301,12 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
 
             print(f"[{passo:>5}/{PASSOS}] loss {loss_acum:.4f} | val {loss_val:.4f} | "
                   f"ppl {perplexity:.1f} | lr {lr:.1e} | {tok_s:.0f} tok/s{vram_info}{melhor}")
+
+            # ─── Early Stopping ──────────────────────────────────────
+            if passo - passo_melhor >= PACIENCIA and passo > WARMUP:
+                print(f"\n  EARLY STOPPING: val loss nao melhorou por {PACIENCIA} passos")
+                print(f"  Melhor val loss: {melhor_val:.4f} (passo {passo_melhor})")
+                break
 
         # ─── Checkpoint ───────────────────────────────────────────────
         if passo % SALVAR == 0 and passo > 0:
