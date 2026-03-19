@@ -131,7 +131,7 @@ class Keilinks(nn.Module):
         x = self.drop_entrada(self.embedding_token(tokens) + self.embedding_posicao(pos))
         for bloco in self.blocos:
             if self.usar_grad_checkpoint and self.training:
-                x = torch_checkpoint(bloco, x, use_reentrant=False)
+                x, _ = torch_checkpoint(bloco, x, use_reentrant=False)
             else:
                 x, _ = bloco(x)
         logits = self.cabeca_saida(self.norm_final(x))

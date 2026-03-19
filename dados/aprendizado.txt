@@ -36,3 +36,8 @@
 <vitor>verdade, voce esta vivo ou nao<fim><keilinks>Viagens e comida<fim>
 <vitor>x men oq é<fim><keilinks>X é caótico, cheio de gente discutindo política e tech. Ótimo pra seguir dev e ficar atualizado, mas o feed é tóxico às vezes. Twitter era melhor, viu.<fim>
 <vitor>X-men o que é<fim><keilinks>X é caótico, cheio de gente discutindo política e tech. Ótimo pra seguir dev e ficar atualizado, mas o feed é tóxico às vezes. Twitter era melhor, viu.<fim>
+<vitor>ola keilinks<fim><keilinks>Oi! O que tá rolando?<fim>
+<vitor>tudo bem?<fim><keilinks>Opa, tudo certo! E aí, como vai?<fim>
+<vitor>ola?<fim><keilinks>ola! como posso ajudar?<fim>
+<vitor>quando einsten morreu?<fim><keilinks>Júlio César foi assassinado por um grupo de até 60 conspiradores, liderados por Caio Cássio Longino e Marco Júnio Bruto, na Casa do Senado nos idos de março (15 de março) de 44 aC.<fim>
+<vitor>einstem<fim><keilinks>tipo, estatisticamente é quase impossível ser só terra mesmo<fim>

@@ -61,18 +61,19 @@
     }
 
     .login-logo {
-      width: 72px;
-      height: 72px;
+      width: 90px;
+      height: 90px;
       border-radius: 50%;
-      background: linear-gradient(135deg, var(--purple), var(--purple2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 30px;
-      font-weight: 700;
-      color: white;
       margin: 0 auto 20px;
-      box-shadow: 0 0 40px rgba(124,58,237,0.4);
+      animation: logoFloat 3s ease-in-out infinite;
+      filter: drop-shadow(0 0 20px rgba(200,50,180,0.5));
+    }
+
+    .login-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
     }
 
     .login-box h2 {
@@ -185,14 +186,15 @@
       width: 36px;
       height: 36px;
       border-radius: 50%;
-      background: linear-gradient(135deg, var(--purple), var(--purple2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      font-weight: 700;
-      color: white;
       flex-shrink: 0;
+      overflow: hidden;
+      filter: drop-shadow(0 0 8px rgba(200,50,180,0.4));
+    }
+
+    .sidebar-header .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     .sidebar-header .user-info {
@@ -317,15 +319,15 @@
       width: 36px;
       height: 36px;
       border-radius: 50%;
-      background: linear-gradient(135deg, var(--purple), var(--purple2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      font-weight: 700;
-      color: white;
       flex-shrink: 0;
-      box-shadow: 0 0 16px rgba(124,58,237,0.3);
+      overflow: hidden;
+      filter: drop-shadow(0 0 10px rgba(200,50,180,0.4));
+    }
+
+    .chat-header .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     .chat-header .header-info h1 {
@@ -479,6 +481,29 @@
       50% { opacity: 0.4; }
     }
 
+    /* Animações da logo */
+    @keyframes logoFloat {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-6px); }
+    }
+
+    @keyframes logoPensando {
+      0%, 100% { transform: scale(1) rotate(0deg); }
+      25% { transform: scale(1.1) rotate(5deg); }
+      50% { transform: scale(1.05) rotate(-3deg); }
+      75% { transform: scale(1.1) rotate(3deg); }
+    }
+
+    @keyframes logoGlow {
+      0%, 100% { filter: brightness(1) drop-shadow(0 0 4px rgba(200,50,180,0.3)); }
+      50% { filter: brightness(1.3) drop-shadow(0 0 12px rgba(200,50,180,0.7)); }
+    }
+
+    @keyframes logoPulseHeader {
+      0%, 100% { filter: drop-shadow(0 0 10px rgba(200,50,180,0.4)); }
+      50% { filter: drop-shadow(0 0 20px rgba(200,50,180,0.8)); }
+    }
+
     /* Chat messages */
     #chat {
       flex: 1;
@@ -519,8 +544,25 @@
     }
 
     .msg.kei .msg-avatar {
-      background: linear-gradient(135deg, var(--purple), var(--purple2));
-      color: white;
+      background: transparent;
+      overflow: hidden;
+      filter: drop-shadow(0 0 6px rgba(200,50,180,0.3));
+    }
+
+    .msg.kei .msg-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
+    }
+
+    /* Animação quando está pensando */
+    .msg.kei.typing .msg-avatar {
+      animation: logoPensando 1.5s ease-in-out infinite;
+    }
+
+    .msg.kei.typing .msg-avatar img {
+      animation: logoGlow 1.5s ease-in-out infinite;
     }
 
     .msg.usr .msg-avatar {
@@ -627,18 +669,19 @@
     }
 
     .boas-vindas .logo {
-      width: 64px;
-      height: 64px;
+      width: 80px;
+      height: 80px;
       border-radius: 50%;
-      background: linear-gradient(135deg, var(--purple), var(--purple2));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 26px;
-      font-weight: 700;
-      color: white;
       margin: 0 auto 16px;
-      box-shadow: 0 0 40px rgba(124,58,237,0.3);
+      overflow: hidden;
+      animation: logoFloat 3s ease-in-out infinite;
+      filter: drop-shadow(0 0 25px rgba(200,50,180,0.5));
+    }
+
+    .boas-vindas .logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     .boas-vindas h2 { font-size: 20px; color: var(--text); margin-bottom: 8px; }
@@ -735,7 +778,7 @@
 <!-- ─── Tela de Login ─── -->
 <div id="login-screen">
   <div class="login-box">
-    <div class="login-logo">K</div>
+    <div class="login-logo"><img src="/assets/KeilinksLogo.png" alt="Keilinks"></div>
     <h2>Keilinks</h2>
     <p>IA Desenvolvida by Vitor Camillo</p>
 
@@ -763,7 +806,7 @@
   <!-- Sidebar -->
   <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
-      <div class="avatar">K</div>
+      <div class="avatar"><img src="/assets/KeilinksLogo.png" alt="K"></div>
       <div class="user-info">
         <div class="user-name" id="user-name">Keilinks</div>
         <div class="user-sub" id="user-sub">online</div>
@@ -782,7 +825,7 @@
   <div class="chat-area">
     <div class="chat-header">
       <button class="btn-menu-mobile" onclick="toggleSidebar()">&#9776;</button>
-      <div class="avatar">K</div>
+      <div class="avatar"><img src="/assets/KeilinksLogo.png" alt="K"></div>
       <div class="header-info">
         <h1>Keilinks</h1>
         <div class="status">
@@ -810,7 +853,7 @@
 
     <div id="chat">
       <div class="boas-vindas">
-        <div class="logo">K</div>
+        <div class="logo"><img src="/assets/KeilinksLogo.png" alt="Keilinks"></div>
         <h2>Keilinks</h2>
         <p>Clique em "+ Nova conversa" para comecar.</p>
       </div>
@@ -1053,7 +1096,7 @@
 
   function mostrarBoasVindas() {
     chat.innerHTML = `<div class="boas-vindas">
-      <div class="logo">K</div>
+      <div class="logo"><img src="/assets/KeilinksLogo.png" alt="Keilinks"></div>
       <h2>Keilinks</h2>
       <p>Clique em "+ Nova conversa" para comecar.</p>
     </div>`;
@@ -1157,11 +1200,13 @@
     const bv = chat.querySelector('.boas-vindas');
     if (bv) bv.remove();
 
-    const inicial = tipo === 'kei' ? 'K' : (currentUser && currentUser.nome ? currentUser.nome[0].toUpperCase() : 'V');
+    const avatarHtml = tipo === 'kei'
+      ? '<div class="msg-avatar"><img src="/assets/KeilinksLogo.png" alt="K"></div>'
+      : `<div class="msg-avatar">${currentUser && currentUser.nome ? currentUser.nome[0].toUpperCase() : 'V'}</div>`;
     const div = document.createElement('div');
     div.className = `msg ${tipo}`;
     div.innerHTML = `
-      <div class="msg-avatar">${inicial}</div>
+      ${avatarHtml}
       <div class="bubble">${escapeHtml(texto)}</div>
     `;
     chat.appendChild(div);
@@ -1176,7 +1221,7 @@
     div.className = 'msg kei typing';
     div.id = 'typing';
     div.innerHTML = `
-      <div class="msg-avatar">K</div>
+      <div class="msg-avatar"><img src="/assets/KeilinksLogo.png" alt="K"></div>
       <div class="bubble">
         <div class="dot"></div>
         <div class="dot"></div>
@@ -1214,6 +1259,9 @@
     if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
     const t = document.getElementById('typing');
     if (t) t.remove();
+    // Para animação do header
+    const headerAvatar = document.querySelector('.chat-header .avatar');
+    if (headerAvatar) headerAvatar.style.animation = '';
   }
 
   async function enviar() {
@@ -1242,6 +1290,9 @@
 
     adicionarMsg(texto, 'usr');
     mostrarDigitando();
+    // Pulsa a logo do header enquanto pensa
+    const headerAvatar = document.querySelector('.chat-header .avatar');
+    if (headerAvatar) headerAvatar.style.animation = 'logoPensando 1.5s ease-in-out infinite';
 
     try {
       const body = {

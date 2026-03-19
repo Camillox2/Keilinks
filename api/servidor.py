@@ -315,6 +315,10 @@ def retreinar_background(tipo):
 def index():
     return send_from_directory(INTERFACE_DIR, 'index.html')
 
+@app.route('/assets/<path:filename>')
+def assets(filename):
+    return send_from_directory(INTERFACE_DIR, filename)
+
 @app.errorhandler(404)
 def fallback_to_index(e):
     if request.method == 'GET' and not request.path.startswith('/api/'):
