@@ -51,6 +51,7 @@ dados/*.json
 dados/crawler_log.json
 dados/historico.json
 dados/conversas.txt
+dados/multiturn.txt
 
 # Compiled extensions
 *.so

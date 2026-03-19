@@ -1169,6 +1169,8 @@
     return div;
   }
 
+  let typingTimer = null;
+
   function mostrarDigitando() {
     const div = document.createElement('div');
     div.className = 'msg kei typing';
@@ -1183,9 +1185,33 @@
     `;
     chat.appendChild(div);
     scrollToBottom();
+
+    // Depois de 2s, mostra fases do pensamento
+    if (typingTimer) clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      const t = document.getElementById('typing');
+      if (!t) return;
+      const bubble = t.querySelector('.bubble');
+      bubble.innerHTML = '<span style="font-size:12px;color:var(--purple2);animation:pulse 1.5s infinite">Pensando...</span>';
+      scrollToBottom();
+
+      // Depois de mais 2s, se web ativo mostra pesquisando
+      typingTimer = setTimeout(() => {
+        const t2 = document.getElementById('typing');
+        if (!t2) return;
+        const bubble2 = t2.querySelector('.bubble');
+        if (webEnabled) {
+          bubble2.innerHTML = '<span style="font-size:12px;color:#4ade80;animation:pulse 1.5s infinite">&#x1F310; Pesquisando na web...</span>';
+        } else {
+          bubble2.innerHTML = '<span style="font-size:12px;color:var(--purple2);animation:pulse 1.5s infinite">Gerando resposta...</span>';
+        }
+        scrollToBottom();
+      }, 2000);
+    }, 2000);
   }
 
   function removerDigitando() {
+    if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
     const t = document.getElementById('typing');
     if (t) t.remove();
   }
@@ -1239,13 +1265,17 @@
         const msgEl = adicionarMsg(data.resposta, 'kei');
         const badges = [];
         const f = data.fonte;
-        if (f === 'web')       badges.push(`<span class="badge web">Web</span>`);
+        if (f === 'web')       badges.push(`<span class="badge web">&#x1F310; Pesquisou na web</span>`);
         if (f === 'knowledge') badges.push(`<span class="badge flash">Aprendido</span>`);
         if (f === 'modelo')    badges.push(`<span class="badge ultra">${data.modelo}</span>`);
         if (f === 'retrieval') badges.push(`<span class="badge flash">Base</span>`);
+        if (data.confianca !== undefined) {
+          const cor = data.confianca >= 80 ? '#4ade80' : data.confianca >= 50 ? '#fbbf24' : '#f87171';
+          badges.push(`<span class="badge" style="background:rgba(255,255,255,0.05);color:${cor}">${data.confianca}% confianca</span>`);
+        }
         if (badges.length) {
           const bdiv = document.createElement('div');
-          bdiv.innerHTML = badges.join('');
+          bdiv.innerHTML = badges.join(' ');
           msgEl.querySelector('.bubble').appendChild(bdiv);
         }
       } else {
