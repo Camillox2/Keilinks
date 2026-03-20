@@ -12,6 +12,7 @@ Uso:
   python treino/pretreinar.py --modelo flash
   python treino/pretreinar.py --modelo flash --passos 50000
   python treino/pretreinar.py --modelo flash --limite-tokens 2000000000  (2B tokens)
+  python treino/pretreinar.py --modelo flash --rebuild-vocab  (força reconstruir vocab)
 """
 
 import torch
@@ -134,34 +135,33 @@ def tokenizar_para_disco(tokenizador, limite_tokens=None):
 
         tokens_arq = tokens_ja_feitos
         ultimo_checkpoint = tokens_ja_feitos
+        pos_bytes = pos_bytes_inicio
 
-        with open(arq, 'r', encoding='utf-8', errors='replace') as f:
+        with open(arq, 'rb') as f, open(bin_arq, 'ab') as fb:
             if pos_bytes_inicio > 0:
                 f.seek(pos_bytes_inicio)
 
             chunk_size = 10 * 1024 * 1024  # 10MB
-            pos_bytes = pos_bytes_inicio
 
             while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
+                raw = f.read(chunk_size)
+                if not raw:
                     break
 
+                chunk = raw.decode('utf-8', errors='replace')
                 toks = np.array(tokenizador.encode(chunk), dtype=np.int32)
 
-                # Append no .bin do arquivo
-                with open(bin_arq, 'ab') as fb:
-                    fb.write(toks.tobytes())
+                fb.write(toks.tobytes())
 
                 tokens_arq += len(toks)
-                total_tokens_global_agora = (total_tokens_global - tokens_ja_feitos) + tokens_arq
-                pos_bytes += len(chunk.encode('utf-8', errors='replace'))
+                pos_bytes = f.tell()
 
                 # Progresso visual
                 bytes_agora = bytes_antes + pos_bytes
                 pct = min(bytes_agora / bytes_totais * 100, 100)
                 elapsed = time.time() - t0
-                tok_s = max(total_tokens_global_agora / max(elapsed, 1), 1)
+                tokens_nesta_sessao = (tokens_arq - tokens_ja_feitos)
+                tok_s = max(tokens_nesta_sessao / max(elapsed, 1), 1)
                 print(f"\r    {nome}: {pct:.1f}% | {tokens_arq/1e6:.1f}M tokens | {tok_s/1e6:.1f}M tok/s   ", end='', flush=True)
 
                 # Checkpoint a cada 100M tokens
@@ -172,7 +172,7 @@ def tokenizar_para_disco(tokenizador, limite_tokens=None):
                     ultimo_checkpoint = tokens_arq
 
                 # Limite de tokens
-                if limite_tokens and (total_tokens_global - tokens_ja_feitos + tokens_arq) >= limite_tokens:
+                if limite_tokens and (total_tokens_global + tokens_arq - tokens_ja_feitos) >= limite_tokens:
                     print(f"\n    Limite de {limite_tokens/1e6:.0f}M tokens atingido")
                     break
 
@@ -181,7 +181,7 @@ def tokenizar_para_disco(tokenizador, limite_tokens=None):
         with open(progress_file, 'w') as fp:
             _json.dump(progress, fp)
 
-        total_tokens_global = (total_tokens_global - tokens_ja_feitos) + tokens_arq
+        total_tokens_global += tokens_arq - tokens_ja_feitos
         bytes_antes += arq_size
 
         print(f"\n    {nome}: {tokens_arq/1e6:.1f}M tokens — concluído")
@@ -253,25 +253,30 @@ def pegar_batch(data, batch_size, contexto, device):
     """Pega batch direto do memmap — sem carregar tudo na RAM"""
     ctx = min(contexto, len(data) - 1)
     ix = np.random.randint(0, len(data) - ctx, size=(batch_size,))
-    x = torch.tensor(np.stack([data[i:i+ctx].astype(np.int64)   for i in ix]), dtype=torch.long).to(device)
-    y = torch.tensor(np.stack([data[i+1:i+ctx+1].astype(np.int64) for i in ix]), dtype=torch.long).to(device)
+    # np.stack copia do memmap, torch converte int32→int64 direto
+    x = torch.as_tensor(np.stack([data[i:i+ctx]   for i in ix]), dtype=torch.long, device=device)
+    y = torch.as_tensor(np.stack([data[i+1:i+ctx+1] for i in ix]), dtype=torch.long, device=device)
     return x, y
 
 
 @torch.no_grad()
-def avaliar(modelo, val_data, batch_size, contexto, device, n=10):
+def avaliar(modelo, val_data, batch_size, contexto, device, criterio=None, n=10):
     modelo.eval()
     losses = []
     for _ in range(n):
         x, y = pegar_batch(val_data, batch_size, contexto, device)
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(device == 'cuda')):
-            _, loss = modelo(x, y)
+            logits, _ = modelo(x)
+            if criterio:
+                loss = criterio(logits.view(-1, logits.size(-1)), y.view(-1))
+            else:
+                loss = nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1))
         losses.append(loss.item())
     modelo.train()
     return sum(losses) / len(losses)
 
 
-def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
+def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None, rebuild_vocab=False):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     if device == 'cuda':
@@ -308,24 +313,26 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
     # Tokenizador — constroi vocab nos dados de pretreino
     tokenizador = Tokenizador()
 
-    # Carrega uma amostra pra construir vocab
-    print("\n  Construindo vocabulário nos dados de pré-treino...")
-    textos_amostra = []
-    pasta = 'dados/pretreino'
-    for arq in glob.glob(os.path.join(pasta, '*.txt')):
-        with open(arq, 'r', encoding='utf-8', errors='replace') as f:
-            # Lê primeiros 20MB de cada arquivo pra vocab
-            textos_amostra.append(f.read(20 * 1024 * 1024))
+    vocab_path = 'dados/vocab_pretreino.json'
+    if os.path.exists(vocab_path) and not rebuild_vocab:
+        print(f"\n  Vocab já existe ({vocab_path}) — reutilizando")
+        tokenizador.carregar(vocab_path)
+    else:
+        print("\n  Construindo vocabulário nos dados de pré-treino...")
+        textos_amostra = []
+        pasta = 'dados/pretreino'
+        for arq in glob.glob(os.path.join(pasta, '*.txt')):
+            with open(arq, 'r', encoding='utf-8', errors='replace') as f:
+                textos_amostra.append(f.read(20 * 1024 * 1024))
 
-    # Inclui dados conversacionais no vocab também
-    conv_path = 'dados/conversas.txt'
-    if os.path.exists(conv_path):
-        with open(conv_path, 'r', encoding='utf-8') as f:
-            textos_amostra.append(f.read())
+        conv_path = 'dados/conversas.txt'
+        if os.path.exists(conv_path):
+            with open(conv_path, 'r', encoding='utf-8') as f:
+                textos_amostra.append(f.read())
 
-    vocab_alvo = cfg_modelo.get('vocab_size', 32000)
-    tokenizador.construir_vocab(textos_amostra, vocab_alvo=vocab_alvo)
-    tokenizador.salvar('dados/vocab_pretreino.json')
+        vocab_alvo = cfg_modelo.get('vocab_size', 32000)
+        tokenizador.construir_vocab(textos_amostra, vocab_alvo=vocab_alvo)
+        tokenizador.salvar(vocab_path)
 
     # Tokeniza pra disco (memmap) — não carrega na RAM
     treino_data, val_data, total_tokens = tokenizar_para_disco(tokenizador, limite_tokens)
@@ -348,6 +355,9 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
     if GRAD_CKPT:
         modelo.usar_grad_checkpoint = True
         print(f"  Gradient checkpointing ATIVADO")
+
+    # Label smoothing pra melhor generalização
+    criterio = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     # Retoma checkpoint se existir
     passo_inicial = 0
@@ -372,18 +382,48 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
             modelo.load_state_dict(state, strict=False)
             passo_inicial = ckpt['passo']
             print(f"  Retomando pré-treino do passo {passo_inicial}")
+
+            # Restaura optimizer do mesmo checkpoint (já carregado)
+            otimizador_state = ckpt.get('otimizador', None)
         else:
             print(f"  Arquitetura mudou, pré-treinando do zero")
+            otimizador_state = None
+        del ckpt
+    else:
+        otimizador_state = None
+
+    # torch.compile DEPOIS de carregar checkpoint (senão compila pesos errados)
+    modelo_exec = modelo
+    if hasattr(torch, 'compile') and device == 'cuda':
+        try:
+            modelo_exec = torch.compile(modelo)
+            print(f"  torch.compile ATIVADO")
+        except Exception as e:
+            print(f"  torch.compile falhou ({e}), usando modo normal")
 
     otimizador = torch.optim.AdamW(
         modelo.parameters(), lr=LR_MAX, betas=(0.9, 0.95), weight_decay=0.1
     )
+
+    if otimizador_state is not None:
+        try:
+            otimizador.load_state_dict(otimizador_state)
+            print(f"  Optimizer restaurado do checkpoint")
+        except Exception:
+            print(f"  Optimizer incompatível, reiniciando")
+        del otimizador_state
 
     melhor_val = float('inf')
     passo_melhor = 0
     inicio = time.time()
 
     saida_final = f'checkpoints/keilinks_{tipo_modelo}_pretreino.pt'
+
+    # Log CSV pra plotar depois
+    log_csv = f'checkpoints/pretreino_{tipo_modelo}_log.csv'
+    if passo_inicial == 0 or not os.path.exists(log_csv):
+        with open(log_csv, 'w') as f:
+            f.write('passo,loss_treino,loss_val,perplexity,lr,tok_s\n')
 
     print(f"\n  Iniciando pré-treino...\n")
 
@@ -398,7 +438,8 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
         for micro in range(ACCUM):
             x, y = pegar_batch(treino_data, BATCH, CONTEXTO_REAL, device)
             with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=(device == 'cuda')):
-                _, loss = modelo(x, y)
+                logits, _ = modelo_exec(x)  # sem targets pra não calcular loss interno
+                loss = criterio(logits.view(-1, logits.size(-1)), y.view(-1))
                 loss_escalonada = loss / ACCUM
 
             loss_escalonada.backward()
@@ -409,11 +450,12 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
         torch.nn.utils.clip_grad_norm_(modelo.parameters(), GRAD_CLIP)
         otimizador.step()
 
-        if passo % AVALIAR == 0:
-            loss_val = avaliar(modelo, val_data, BATCH, CONTEXTO_REAL, device)
+        if passo % AVALIAR == 0 and passo > passo_inicial:
+            loss_val = avaliar(modelo, val_data, BATCH, CONTEXTO_REAL, device, criterio=criterio)
             perplexity = math.exp(min(loss_val, 20))
             elapsed = time.time() - inicio
-            tok_s = (passo * batch_efetivo * CONTEXTO_REAL) / max(elapsed, 1)
+            passos_feitos = max(passo - passo_inicial, 1)
+            tok_s = (passos_feitos * batch_efetivo * CONTEXTO_REAL) / max(elapsed, 1)
             melhor = ''
 
             if loss_val < melhor_val:
@@ -442,6 +484,10 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None):
 
             print(f"[{passo:>6}/{PASSOS}] loss {loss_acum:.4f} | val {loss_val:.4f} | "
                   f"ppl {perplexity:.1f} | lr {lr:.1e} | {tok_s:.0f} tok/s{vram_info}{eta}{melhor}")
+
+            # Log CSV
+            with open(log_csv, 'a') as f:
+                f.write(f"{passo},{loss_acum:.6f},{loss_val:.6f},{perplexity:.2f},{lr:.2e},{tok_s:.0f}\n")
 
             # Early stopping
             if passo - passo_melhor >= PACIENCIA and passo > WARMUP:
@@ -485,5 +531,6 @@ if __name__ == '__main__':
     parser.add_argument('--modelo', choices=['flash', 'padrao', 'ultra'], default='flash')
     parser.add_argument('--passos', type=int, default=None, help='Total de passos (override)')
     parser.add_argument('--limite-tokens', type=int, default=None, help='Limite de tokens (ex: 2000000000 pra 2B)')
+    parser.add_argument('--rebuild-vocab', action='store_true', help='Força reconstrução do vocabulário')
     args = parser.parse_args()
-    pretreinar(args.modelo, passos_override=args.passos, limite_tokens=args.limite_tokens)
+    pretreinar(args.modelo, passos_override=args.passos, limite_tokens=args.limite_tokens, rebuild_vocab=args.rebuild_vocab)
