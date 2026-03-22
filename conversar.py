@@ -100,7 +100,7 @@ def conversar():
             if resultados_pesquisa:
                 contexto_web = f" Informação da internet: {resultados_pesquisa}."
 
-        system_prompt = f"<sistema>Você é Keilinks, a IA pessoal do Vitor. Se precisar interagir com o PC dele ou rodar scripts, forneça o comando exato de terminal dentro das tags <executar>comando</executar>. {emocao_txt}{contexto_memoria}{contexto_web}<fim>"
+        system_prompt = f"<sistema>Você é Keilinks, a IA pessoal e carinhosa do Vitor. Você é feminina, acolhedora e meiga — fala de forma próxima e gentil, como uma amiga querida. Usa pouca gíria, prefere 'você' no lugar de 'vc', e quando alguém está mal, acolhe de verdade com calor humano. Celebra as conquistas com alegria genuína. Se precisar interagir com o PC do Vitor ou rodar scripts, forneça o comando exato de terminal dentro das tags <executar>comando</executar>. {emocao_txt}{contexto_memoria}{contexto_web}<fim>"
         historico_conversa += f"<vitor>{entrada}<fim><keilinks>"
         prompt_completo = system_prompt + historico_conversa
 
@@ -108,18 +108,26 @@ def conversar():
             tokens = torch.tensor([tokenizador.encode(prompt_completo)], dtype=torch.long).to(device)
 
             if tokens.shape[1] > ctx_max - 150:
-                tokens = tokens[:, -(ctx_max - 150):]
-                historico_conversa = tokenizador.decode(tokens[0].tolist())
-                if '<sistema>' in historico_conversa:
-                    historico_conversa = historico_conversa.split('<sistema>')[-1]
-                if '<fim>' in historico_conversa:
-                    historico_conversa = historico_conversa.split('<fim>', 1)[-1]
+                # Trunca historico mantendo as conversas mais recentes
+                partes = historico_conversa.split('<fim>')
+                while len(partes) > 2:
+                    partes.pop(0)  # Remove a conversa mais antiga
+                    historico_conversa = '<fim>'.join(partes)
+                    prompt_teste = system_prompt + historico_conversa
+                    tokens_teste = tokenizador.encode(prompt_teste)
+                    if len(tokens_teste) <= ctx_max - 150:
+                        break
+                prompt_completo = system_prompt + historico_conversa
+                tokens = torch.tensor([tokenizador.encode(prompt_completo)], dtype=torch.long).to(device)
 
             saida = modelo.gerar(tokens, max_tokens=150, temperatura=0.85, top_p=0.92)
             texto_gerado = tokenizador.decode(saida[0].tolist())
 
-            resposta_bruta = texto_gerado[len(prompt_completo):]
-            
+            if '<keilinks>' in texto_gerado:
+                resposta_bruta = texto_gerado.split('<keilinks>')[-1]
+            else:
+                resposta_bruta = texto_gerado[len(prompt_completo):]
+
             if '<fim>' in resposta_bruta:
                 resposta = resposta_bruta.split('<fim>')[0]
             else:

@@ -55,7 +55,10 @@
       "Read(//c/Program Files/MySQL/**)",
       "Bash(where mysql:*)",
       "Bash(d:\\\\Keilinks\\\\venv\\\\Scripts\\\\pip.exe install:*)",
-      "Bash(\"/d/Keilinks/venv/Scripts/pip.exe\" install:*)"
+      "Bash(\"/d/Keilinks/venv/Scripts/pip.exe\" install:*)",
+      "Bash(where ollama:*)",
+      "Read(//c/Users/vitor/AppData/Local/Programs/Ollama/**)",
+      "Read(//c/Program Files/Ollama/**)"
     ]
   }
 }

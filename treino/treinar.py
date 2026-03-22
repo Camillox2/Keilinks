@@ -172,12 +172,21 @@ def treinar(tipo_modelo: str, batch_override=None, accum_override=None, passos_o
         return
 
     tokenizador = Tokenizador()
-    with open(caminho_dados, 'r', encoding='utf-8') as f:
-        texto = f.read()
 
-    vocab_alvo = cfg_modelo.get('vocab_size', 32000)
-    tokenizador.construir_vocab([texto], vocab_alvo=vocab_alvo)
-    tokenizador.salvar('dados/vocab.json')
+    # Se usando pretreino, DEVE reutilizar o mesmo vocab (senão token IDs ficam errados)
+    vocab_path = 'dados/vocab.json'
+    if usar_pretreino and os.path.exists(vocab_path):
+        print(f"  Vocab:       reutilizando {vocab_path} (mesmo do pré-treino)")
+        tokenizador.carregar(vocab_path)
+    elif os.path.exists(vocab_path):
+        print(f"  Vocab:       reutilizando {vocab_path}")
+        tokenizador.carregar(vocab_path)
+    else:
+        with open(caminho_dados, 'r', encoding='utf-8') as f:
+            texto = f.read()
+        vocab_alvo = cfg_modelo.get('vocab_size', 32000)
+        tokenizador.construir_vocab([texto], vocab_alvo=vocab_alvo)
+        tokenizador.salvar(vocab_path)
 
     treino_data, val_data = preparar_dados(caminho_dados, tokenizador, CONTEXTO)
 

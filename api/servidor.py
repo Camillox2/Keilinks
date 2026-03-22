@@ -167,9 +167,9 @@ def texto_eh_lixo(texto):
     curtas = sum(1 for p in palavras if len(p) <= 2)
     if len(palavras) > 3 and curtas / len(palavras) > 0.7:
         return True
-    if len(palavras) <= 3 and len(texto) < 25:
+    if len(palavras) == 1 and len(texto) < 10:
         reais = [p for p in palavras if len(p) >= 3]
-        if len(reais) < 2:
+        if len(reais) < 1:
             return True
     if len(palavras) >= 3:
         unicas = set(p.lower() for p in palavras)
@@ -190,6 +190,16 @@ def texto_eh_lixo(texto):
         'nao possuo sentimentos', 'nao tenho sentimentos',
     ]
     if any(f in t for f in frases_chatbot):
+        return True
+    # Detecta texto enciclopedico/Wikipedia (modo pre-treino vazando)
+    marcadores_wiki = ['foi um', 'foi uma', 'é um município', 'é uma cidade',
+                       'nasceu em', 'faleceu em', 'é uma freguesia',
+                       'capital)', 'século', 'guerra', 'independência']
+    wiki_hits = sum(1 for m in marcadores_wiki if m in t)
+    if wiki_hits >= 2 and len(palavras) > 20:
+        return True
+    # Respostas longas demais pra chat casual (>100 palavras sem codigo)
+    if len(palavras) > 80 and '```' not in texto and 'def ' not in texto:
         return True
     return False
 
@@ -260,7 +270,7 @@ def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200,
     if not modelo:
         return None
 
-    temp_ajustada = min(temperatura, 0.5) if tipo_usado == 'flash' else min(temperatura, 0.6)
+    temp_ajustada = min(temperatura, 0.85) if tipo_usado == 'flash' else min(temperatura, 0.9)
 
     cfg = modelo.config if hasattr(modelo, 'config') else {}
     ctx_max = cfg.get('contexto_max', 512)
@@ -271,19 +281,15 @@ def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200,
         for h_p, h_r in historico:
             prompt_historico += f'<vitor>{h_p}<fim><keilinks>{h_r}<fim>'
 
-    # Contexto extra (personalidade + memoria + tempo + semantico)
-    partes_ctx = []
-    if PERSONALIDADE_RESUMO:
-        partes_ctx.append(PERSONALIDADE_RESUMO[:200])
+    # System prompt no formato que o modelo aprendeu no treino
+    sistema_parts = ["Você é Keilinks, a IA pessoal e carinhosa do Vitor."]
     if contexto_memoria:
-        partes_ctx.append(contexto_memoria[:150])
-    partes_ctx.append(f"agora: {_montar_contexto_temporal()}")
+        sistema_parts.append(contexto_memoria[:150])
     if contexto_semantico:
-        partes_ctx.append(f"info: {contexto_semantico[:150]}")
-    ctx_texto = ' | '.join(partes_ctx)
+        sistema_parts.append(f"info: {contexto_semantico[:150]}")
+    sistema_texto = ' '.join(sistema_parts)
 
-    msg_com_ctx = f"{mensagem} ({ctx_texto})" if ctx_texto else mensagem
-    prompt = f'{prompt_historico}<vitor>{msg_com_ctx}<fim><keilinks>'
+    prompt = f'<sistema>{sistema_texto}<fim>{prompt_historico}<vitor>{mensagem}<fim><keilinks>'
 
     tokens_prompt = tokenizador.encode(prompt)
     margem = max_tokens + 20
@@ -315,7 +321,7 @@ def gerar_com_modelo(mensagem, tipo, temperatura=0.8, max_tokens=200,
 def salvar_conversa_txt(pergunta, resposta):
     os.makedirs(DADOS_DIR, exist_ok=True)
     with open(APRENDIZADO, 'a', encoding='utf-8') as arq:
-        arq.write(f"<vitor>{pergunta}<fim><keilinks>{resposta}<fim>\n")
+        arq.write(f"<sistema>Você é Keilinks, a IA pessoal e carinhosa do Vitor.<fim><vitor>{pergunta}<fim><keilinks>{resposta}<fim>\n")
 
 
 def retreinar_background(tipo):
@@ -604,14 +610,8 @@ def chat_stream():
 
     mensagem_normalizada = normalizar(mensagem)
 
-    # Monta prompt
-    partes_ctx = []
-    if PERSONALIDADE_RESUMO:
-        partes_ctx.append(PERSONALIDADE_RESUMO[:200])
-    partes_ctx.append(f"agora: {_montar_contexto_temporal()}")
-    ctx_texto = ' | '.join(partes_ctx)
-    msg_com_ctx = f"{mensagem_normalizada} ({ctx_texto})"
-    prompt = f'<vitor>{msg_com_ctx}<fim><keilinks>'
+    # Monta prompt no formato de treino
+    prompt = f'<sistema>Você é Keilinks, a IA pessoal e carinhosa do Vitor.<fim><vitor>{mensagem_normalizada}<fim><keilinks>'
 
     tokens_prompt = tokenizador.encode(prompt)
     cfg = modelo.config if hasattr(modelo, 'config') else {}
@@ -620,7 +620,7 @@ def chat_stream():
     if len(tokens_prompt) > ctx_max - margem:
         tokens_prompt = tokens_prompt[-(ctx_max - margem):]
 
-    temp_ajustada = min(temperatura, 0.5)
+    temp_ajustada = min(temperatura, 0.85)
     tokens_input = torch.tensor([tokens_prompt], dtype=torch.long).to(device)
 
     def gerar():
@@ -638,6 +638,12 @@ def chat_stream():
                 novo = resp[len(texto_acumulado):]
                 if novo:
                     texto_acumulado = resp
+                    # Detecta loop de repetição: últimas 30 chars repetidas
+                    if len(texto_acumulado) > 60:
+                        metade = len(texto_acumulado) // 2
+                        if texto_acumulado[-metade:] == texto_acumulado[-2*metade:-metade]:
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            return
                     yield f"data: {json.dumps({'token': novo})}\n\n"
         yield f"data: {json.dumps({'done': True})}\n\n"
 

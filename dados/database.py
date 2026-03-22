@@ -370,8 +370,8 @@ def chat_criar(usuario_id: int, titulo: str = 'Nova conversa') -> dict:
                 "INSERT INTO chats (usuario_id, titulo) VALUES (%s, %s)",
                 (usuario_id, titulo)
             )
+            chat_id = cur.lastrowid
         conn.commit()
-        chat_id = cur.lastrowid
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM chats WHERE id = %s", (chat_id,))
             row = cur.fetchone()
@@ -452,7 +452,7 @@ def migrar_json_para_mysql(base_dir: str):
     if os.path.exists(knowledge_path):
         with open(knowledge_path, 'r', encoding='utf-8') as f:
             try: fatos = json.load(f)
-            except: fatos = []
+            except (json.JSONDecodeError, ValueError): fatos = []
         if fatos:
             conn = get_conn()
             try:

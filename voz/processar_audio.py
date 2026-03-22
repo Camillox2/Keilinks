@@ -152,7 +152,7 @@ def processar(caminho_audio, min_silencio=600, limiar_silencio=-40):
         caminho_clip = os.path.join(saida_dir, nome)
 
         # Exporta WAV 22050Hz mono 16bit
-        clip.export(caminho_clip, format="wav", parameters=["-acodec", "pcm_s16le"])
+        clip.export(caminho_clip, format="wav", codec="pcm_s16le")
 
         # Associa com frase (se disponível)
         texto = frases[i] if i < len(frases) else f"[FRASE {i+1} - PREENCHER MANUALMENTE]"

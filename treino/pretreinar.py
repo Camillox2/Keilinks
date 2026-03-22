@@ -252,8 +252,9 @@ def tokenizar_para_disco(tokenizador, limite_tokens=None):
 def pegar_batch(data, batch_size, contexto, device):
     """Pega batch direto do memmap — sem carregar tudo na RAM"""
     ctx = min(contexto, len(data) - 1)
-    ix = np.random.randint(0, len(data) - ctx, size=(batch_size,))
-    # np.stack copia do memmap, torch converte int32→int64 direto
+    # np.random.randint usa int32, estoura com >2B tokens. Usar Generator com int64
+    rng = np.random.default_rng()
+    ix = rng.integers(0, len(data) - ctx, size=(batch_size,))
     x = torch.as_tensor(np.stack([data[i:i+ctx]   for i in ix]), dtype=torch.long, device=device)
     y = torch.as_tensor(np.stack([data[i+1:i+ctx+1] for i in ix]), dtype=torch.long, device=device)
     return x, y
@@ -392,9 +393,9 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None, rebui
     else:
         otimizador_state = None
 
-    # torch.compile DEPOIS de carregar checkpoint (senão compila pesos errados)
+    # torch.compile requer Triton (Linux only), não funciona no Windows
     modelo_exec = modelo
-    if hasattr(torch, 'compile') and device == 'cuda':
+    if hasattr(torch, 'compile') and device == 'cuda' and sys.platform != 'win32':
         try:
             modelo_exec = torch.compile(modelo)
             print(f"  torch.compile ATIVADO")
@@ -505,9 +506,12 @@ def pretreinar(tipo_modelo: str, passos_override=None, limite_tokens=None, rebui
             }, ckpt_pretreino)
             print(f"  >> checkpoint salvo (passo {passo})")
 
-    # Copia vocab do pretreino como vocab principal
+    # Copia vocab do pretreino como vocab principal (fine-tune DEVE usar o mesmo)
     import shutil
+    if os.path.exists('dados/vocab.json'):
+        shutil.copy('dados/vocab.json', 'dados/vocab_backup.json')
     shutil.copy('dados/vocab_pretreino.json', 'dados/vocab.json')
+    print(f"  Vocab copiado: vocab_pretreino.json → vocab.json")
 
     melhor_ppl = math.exp(min(melhor_val, 20))
     print(f"\n{'='*60}")

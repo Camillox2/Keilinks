@@ -176,7 +176,7 @@ class Keilinks(nn.Module):
         """Gera tokens com KV-Cache + RoPE"""
         self.eval()
         ctx_max = self.config['contexto_max']
-        eos_id = self.config.get('eos_id', 1)
+        eos_id = self.config.get('eos_id', 3)
         num_camadas = len(self.blocos)
 
         # Prefill: processa todos os tokens de uma vez
@@ -192,7 +192,7 @@ class Keilinks(nn.Module):
         logits = self.cabeca_saida(self.norm_final(x))
         logits = logits[:, -1, :] / max(temperatura, 1e-8)
 
-        proximo = self._amostrar(logits, top_p)
+        proximo = self._amostrar(logits, top_p, tokens)
         if proximo.item() == eos_id:
             return tokens
         tokens = torch.cat([tokens, proximo], dim=1)
@@ -211,7 +211,7 @@ class Keilinks(nn.Module):
             logits = self.cabeca_saida(self.norm_final(x))
             logits = logits[:, -1, :] / max(temperatura, 1e-8)
 
-            proximo = self._amostrar(logits, top_p)
+            proximo = self._amostrar(logits, top_p, tokens)
             if proximo.item() == eos_id:
                 break
             tokens = torch.cat([tokens, proximo], dim=1)
@@ -219,8 +219,15 @@ class Keilinks(nn.Module):
 
         return tokens
 
-    def _amostrar(self, logits, top_p):
-        """Top-p sampling"""
+    def _amostrar(self, logits, top_p, tokens_gerados=None, repetition_penalty=1.3):
+        """Top-p sampling com repetition penalty"""
+        if tokens_gerados is not None and repetition_penalty != 1.0:
+            ids_vistos = tokens_gerados[0].tolist()[-64:]
+            for tid in set(ids_vistos):
+                if logits[0, tid] > 0:
+                    logits[0, tid] /= repetition_penalty
+                else:
+                    logits[0, tid] *= repetition_penalty
         probs = F.softmax(logits, dim=-1)
         probs_ord, idx_ord = torch.sort(probs, descending=True)
         cum = torch.cumsum(probs_ord, dim=-1)
@@ -233,7 +240,7 @@ class Keilinks(nn.Module):
         """Gera tokens um por um via yield (pra streaming SSE)"""
         self.eval()
         ctx_max = self.config['contexto_max']
-        eos_id = self.config.get('eos_id', 1)
+        eos_id = self.config.get('eos_id', 3)
         num_camadas = len(self.blocos)
 
         tokens_in = tokens[:, -ctx_max:]
@@ -248,9 +255,11 @@ class Keilinks(nn.Module):
         logits = self.cabeca_saida(self.norm_final(x))
         logits = logits[:, -1, :] / max(temperatura, 1e-8)
 
-        proximo = self._amostrar(logits, top_p)
+        tokens_gerados = tokens.clone()
+        proximo = self._amostrar(logits, top_p, tokens_gerados)
         if proximo.item() == eos_id:
             return
+        tokens_gerados = torch.cat([tokens_gerados, proximo], dim=1)
         yield proximo.item()
         pos_atual = T
 
@@ -265,20 +274,21 @@ class Keilinks(nn.Module):
             logits = self.cabeca_saida(self.norm_final(x))
             logits = logits[:, -1, :] / max(temperatura, 1e-8)
 
-            proximo = self._amostrar(logits, top_p)
+            proximo = self._amostrar(logits, top_p, tokens_gerados)
             if proximo.item() == eos_id:
                 return
+            tokens_gerados = torch.cat([tokens_gerados, proximo], dim=1)
             yield proximo.item()
             pos_atual += 1
 
     def _gerar_sem_cache(self, tokens, max_tokens, temperatura, top_p):
         """Fallback sem cache quando contexto estoura"""
-        eos_id = self.config.get('eos_id', 1)
+        eos_id = self.config.get('eos_id', 3)
         for _ in range(max_tokens):
             ctx = tokens[:, -self.config['contexto_max']:]
             logits, _ = self(ctx)
             logits = logits[:, -1, :] / max(temperatura, 1e-8)
-            proximo = self._amostrar(logits, top_p)
+            proximo = self._amostrar(logits, top_p, tokens)
             if proximo.item() == eos_id:
                 break
             tokens = torch.cat([tokens, proximo], dim=1)
