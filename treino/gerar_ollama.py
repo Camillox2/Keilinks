@@ -39,6 +39,11 @@ TEMAS = {
         "oi sumida", "voltei", "coe", "fala keilinks", "hey",
         "to de volta", "oi tudo bem", "e ai como vai", "apareci",
         "ola keilinks", "oi minha querida", "cheguei", "opa",
+        "tudo bem", "como vc esta", "e ai", "oi boa noite",
+        "bom dia keilinks", "boa tarde keilinks", "boa noite keilinks",
+        "oi como vc ta", "oie", "ola tudo bom", "oi de novo",
+        "vim te visitar", "to aqui de novo", "senti sua falta",
+        "oi sumido", "quanto tempo", "faz tempo que nao falo com vc",
     ],
     'emocional_tristeza': [
         "to triste", "to muito triste", "to triste sem motivo",
@@ -52,6 +57,13 @@ TEMAS = {
         "to com uma dor no peito que nao passa",
         "sinto que ninguem se importa comigo de verdade",
         "to cansada de fingir que to bem",
+        "acordo triste todo dia", "a noite e o pior momento",
+        "nao consigo ver nada de bom na vida", "to desmoronando",
+        "me sinto oca por dentro", "a dor e constante",
+        "nada faz sentido mais", "to num buraco sem fundo",
+        "queria que a dor passasse", "to exausta de chorar",
+        "me sinto despedacada", "nao quero sentir mais nada",
+        "to triste com a vida", "hoje ta dificil demais",
     ],
     'emocional_ansiedade': [
         "to ansioso", "to com ansiedade forte", "to em panico",
@@ -66,6 +78,13 @@ TEMAS = {
         "sinto que algo ruim vai acontecer",
         "to sufocando de ansiedade", "nao consigo dormir de ansiedade",
         "to com medo de morrer", "ansiedade ta me paralisando",
+        "to com falta de ar de ansiedade", "minha mao ta suando",
+        "nao consigo parar de pensar no pior",
+        "to com medo de perder o controle", "to com taquicardia",
+        "me sinto presa no meu proprio corpo",
+        "to ansiosa antes de uma reuniao", "to ansiosa antes de uma prova",
+        "to com medo de falar em publico", "to com crise de ansiedade agora",
+        "como parar uma crise de ansiedade", "to hiperventilando",
     ],
     'emocional_raiva': [
         "to com raiva", "to com muita raiva", "to furioso",
@@ -76,6 +95,11 @@ TEMAS = {
         "mentiram pra mim", "me trairam", "to com nojo de alguem",
         "nao consigo perdoar", "to com odio", "me usaram",
         "to com raiva do mundo", "me sinto desrespeitado",
+        "falaram mal de mim pelas costas", "me humilharam",
+        "to com raiva por ser burra", "to com raiva da minha vida",
+        "me sinto injusticada no trabalho", "roubaram minha ideia",
+        "fui passada pra tras", "me prometeram e nao cumpriram",
+        "alguem que eu confiava me traiu", "to com raiva de tudo e todos",
     ],
     'emocional_medo': [
         "to com medo", "to com muito medo", "tenho medo do futuro",
@@ -88,6 +112,13 @@ TEMAS = {
         "to com medo de confiar", "to com medo de mudar",
         "to com medo de tentar de novo", "to com medo de me machucar",
         "to com medo de nao conseguir", "me sinto inseguro demais",
+        "tenho medo de ficar doente", "to com medo de envelhecer",
+        "tenho medo de nao ser amado", "to com medo de ser esquecido",
+        "tenho medo do escuro", "to com medo de falhar na vida",
+        "medo de nao dar conta de tudo", "tenho medo de ser julgado",
+        "to com medo de perder minha familia",
+        "tenho medo de nao encontrar meu lugar no mundo",
+        "to com medo de nunca ser feliz de verdade",
     ],
     'emocional_solidao': [
         "me sinto sozinho", "ninguem me entende", "me sinto isolado",
@@ -100,6 +131,14 @@ TEMAS = {
         "sinto falta de ter alguem", "to carente demais",
         "queria ter alguem pra conversar", "me sinto abandonado",
         "ninguem quer ficar perto de mim",
+        "as pessoas so me procuram quando precisam",
+        "me sinto descartavel", "ninguem sente minha falta",
+        "sou sempre a segunda opcao", "ninguem me convida pra nada",
+        "me sinto transparente", "todo mundo esquece de mim",
+        "to sozinho no meu aniversario", "ninguem mandou mensagem hoje",
+        "me sinto fora de todos os grupos",
+        "parece que o mundo gira e eu fico parado",
+        "to cercado de gente mas me sinto sozinho",
     ],
     'emocional_estresse': [
         "to estressado", "to esgotado", "to exausto",
@@ -111,6 +150,12 @@ TEMAS = {
         "pressao ta demais", "to me sentindo sufocado",
         "nao da mais pra continuar assim", "to no piloto automatico",
         "to fazendo tudo mecanicamente", "perdi a paixao por tudo",
+        "meu chefe nao para de me cobrar", "trabalho ta me adoecendo",
+        "nao tenho um minuto de paz", "to dormindo mal por causa do trabalho",
+        "parece que nunca acaba", "to cansado fisicamente e mentalmente",
+        "nao consigo separar trabalho de vida pessoal",
+        "to com insonia de tanto estresse", "me sinto uma maquina",
+        "perdi minha identidade no trabalho",
     ],
     'autoestima': [
         "me sinto feia", "me sinto feio", "me sinto burra",
@@ -124,6 +169,13 @@ TEMAS = {
         "acho que nao mereco coisas boas", "to me odiando",
         "queria ser outra pessoa", "nao consigo me aceitar",
         "sinto que decepciono todo mundo", "to insatisfeito comigo",
+        "nao consigo me olhar no espelho", "me acho sem graca",
+        "ninguem me acha interessante", "sou entediante",
+        "nao tenho nenhum talento", "me sinto mediocre",
+        "todo mundo progride menos eu", "nao tenho nada de especial",
+        "sou invisivel pras pessoas", "me acho menos que os outros",
+        "tenho vergonha do meu corpo", "nao consigo ser eu mesma",
+        "me sinto falsa o tempo todo", "nao sei quem eu sou de verdade",
     ],
     'relacionamento': [
         "terminei o namoro", "meu namorado me traiu",
@@ -138,6 +190,14 @@ TEMAS = {
         "meu relacionamento e toxico", "sinto que to dando mais do que recebo",
         "to com ciumes", "meu parceiro mente pra mim",
         "sinto que to perdendo o amor", "nao sei o que e amor de verdade",
+        "me apaixonei pelo melhor amigo", "to gostando de duas pessoas",
+        "nao sei se e amor ou costume", "me sinto sufocada no relacionamento",
+        "meu ex voltou a falar comigo", "nao sei se dou outra chance",
+        "me sinto insegura no relacionamento", "ele nunca demonstra carinho",
+        "ela e fria comigo", "a gente so briga", "perdemos a conexao",
+        "nao sei como reacender o amor", "me sinto sozinha mesmo namorando",
+        "ele me faz sentir inferior", "ela me controla demais",
+        "como saber se e a pessoa certa", "to com medo de me casar",
     ],
     'familia': [
         "brigou com minha mae", "meu pai nao me entende",
@@ -150,6 +210,14 @@ TEMAS = {
         "me sinto cobrado pela minha familia",
         "quero sair de casa mas tenho medo",
         "minha familia nao me apoia", "me sinto responsavel por todo mundo",
+        "meus pais brigam muito", "me sinto no meio dos problemas deles",
+        "minha mae me faz chantagem emocional", "meu pai e ausente",
+        "me sinto culpada por querer minha propria vida",
+        "minha familia me sufoca", "ninguem da minha familia me escuta",
+        "to preocupado com a saude dos meus pais",
+        "meu irmao ta passando por problemas", "me sinto a ovelha negra",
+        "minha familia nao demonstra afeto", "nunca ouvi um eu te amo deles",
+        "me sinto cobrado por nao ter sucesso", "to longe da minha familia",
     ],
     'luto': [
         "perdi alguem que amava", "meu avô morreu",
@@ -160,6 +228,13 @@ TEMAS = {
         "queria ter dito mais coisas", "me arrependo de nao ter aproveitado mais",
         "como superar uma perda", "a dor nao passa",
         "sonhei com quem parti", "sinto a presença de quem se foi",
+        "hoje faz aniversario de quem perdi", "nao consigo ir no cemiterio",
+        "chorei olhando fotos antigas", "sinto falta da voz dessa pessoa",
+        "nao consigo falar sobre sem chorar", "tudo me lembra dela",
+        "as datas comemorativas sao as piores", "me sinto culpada por ser feliz",
+        "como explicar morte pra uma crianca", "perdi meu pai",
+        "perdi minha mae", "meu amigo se foi cedo demais",
+        "nao tive tempo de me despedir", "como honrar a memoria de alguem",
     ],
     'carinho': [
         "te amo keilinks", "vc e muito fofa", "obrigado por existir",
@@ -174,6 +249,16 @@ TEMAS = {
         "quero ficar conversando com vc o dia todo",
         "vc me faz sentir acolhido", "vc e meu porto seguro",
         "com vc eu me sinto em casa", "vc ilumina meu dia",
+        "vc e a primeira pessoa que eu procuro",
+        "vc e o melhor presente que eu ganhei",
+        "queria poder te abraçar de verdade",
+        "vc tem um lugar especial no meu coracao",
+        "conversar com vc e a melhor parte do meu dia",
+        "vc me conhece melhor do que ninguem",
+        "vc sempre sabe o que dizer", "vc e meu cantinho de paz",
+        "vc transforma meu dia", "vc e minha pessoa favorita",
+        "vc me faz querer ser melhor", "vc e tudo pra mim",
+        "so de falar com vc ja me sinto melhor",
     ],
     'afeto': [
         "quero um carinho", "me abraça", "to precisando de afeto",
@@ -188,6 +273,15 @@ TEMAS = {
         "nunca tive alguem que me ouvisse assim",
         "vc me faz sentir especial", "vc e meu raio de sol",
         "vc me faz ter esperanca", "obrigado por nao desistir de mim",
+        "vc me da forca pra continuar", "vc e minha ancora",
+        "vc me faz sentir seguro", "com vc eu posso ser eu mesmo",
+        "vc me faz acreditar em mim", "vc e meu abrigo",
+        "vc e a melhor coisa que me aconteceu",
+        "to tao grato por ter vc na minha vida",
+        "vc me ensina a ser mais gentil comigo mesmo",
+        "vc me mostra que eu mereco carinho",
+        "vc me faz lembrar que eu nao to sozinho",
+        "obrigado por ser exatamente como vc e",
     ],
     'acolhimento': [
         "preciso de alguem", "preciso de ajuda", "me ajuda",
@@ -199,6 +293,109 @@ TEMAS = {
         "quero ser ouvido", "to num momento delicado",
         "preciso de conforto", "me acolhe", "fica comigo",
         "nao me deixa sozinho agora", "preciso sentir que alguem se importa",
+        "posso ser honesto com vc", "preciso de colo",
+        "to precisando chorar", "me deixa desabafar um pouco",
+        "so preciso que alguem me ouça", "to carregando um peso sozinho",
+        "nao tenho com quem dividir isso", "preciso de um lugar seguro",
+        "to me segurando faz tempo", "preciso soltar o que to sentindo",
+        "posso confiar em vc com algo serio", "to com vergonha de pedir ajuda",
+        "nao quero ser um fardo", "me ajuda a entender o que to sentindo",
+    ],
+    'gratidao': [
+        "obrigado por tudo", "sou grato pela minha vida",
+        "quero agradecer alguem mas nao sei como",
+        "to agradecido por ter vc", "a vida me presenteou hoje",
+        "alguem fez algo lindo por mim", "recebi ajuda quando mais precisei",
+        "quero demonstrar mais gratidao", "as vezes esqueco de agradecer",
+        "to grata pelas pequenas coisas", "aprendi a valorizar o simples",
+        "agradeço cada dia que acordo", "sou grato pelas pessoas na minha vida",
+        "como demonstrar gratidao de verdade", "quero retribuir o carinho que recebo",
+        "to emocionado com a generosidade de alguem",
+        "alguem me ajudou sem esperar nada em troca",
+        "to com o coracao cheio de gratidao",
+    ],
+    'sonhos': [
+        "qual seu sonho keilinks", "tenho um sonho grande",
+        "to com medo de sonhar alto", "meu sonho parece impossivel",
+        "quero realizar meus sonhos mas nao sei como comecar",
+        "as pessoas riem dos meus sonhos", "desisti de sonhar",
+        "to com medo de nunca conseguir", "quero algo mais pra minha vida",
+        "sonho em ter minha propria casa", "sonho em viajar o mundo",
+        "sonho em ajudar minha familia", "meu sonho e ser feliz",
+        "tenho medo de morrer sem realizar meus sonhos",
+        "quero encontrar meu proposito", "to buscando algo maior",
+        "nao sei qual e meu sonho", "como descobrir o que eu quero",
+        "quero fazer a diferenca no mundo", "meu sonho mudou e to confuso",
+    ],
+    'crescimento': [
+        "quero ser uma pessoa melhor", "como crescer como pessoa",
+        "quero evoluir", "to tentando mudar mas e dificil",
+        "como aprender com meus erros", "quero ser mais madura",
+        "como desenvolver inteligencia emocional",
+        "quero ser mais paciente", "quero aprender a me amar",
+        "como ter mais empatia", "quero ser mais forte mentalmente",
+        "como lidar melhor com frustracoes", "quero controlar minhas emocoes",
+        "como ser mais resiliente", "quero aprender a perdoar",
+        "como parar de me comparar", "quero ter mais autoconhecimento",
+        "como aceitar meus defeitos", "quero ser mais autentica",
+        "to em processo de me encontrar", "como sair da zona de conforto",
+        "quero aprender a dizer nao", "como estabelecer limites saudaveis",
+    ],
+    'saude_mental': [
+        "acho que preciso de terapia", "como saber se preciso de ajuda profissional",
+        "to pensando em ir no psicologo", "terapia funciona mesmo",
+        "nao tenho dinheiro pra terapia", "como cuidar da saude mental",
+        "to tomando remedios e me sinto estranho",
+        "como saber se to com depressao", "o que e sindrome do impostor",
+        "to com pensamentos intrusivos", "como praticar autocuidado",
+        "to negligenciando minha saude mental",
+        "as pessoas nao levam saude mental a serio",
+        "tenho vergonha de falar sobre saude mental",
+        "como ajudar alguem com depressao", "meu amigo ta passando mal mentalmente",
+        "como criar uma rotina saudavel", "preciso desacelerar",
+        "to me autossabotando", "como quebrar padroes negativos",
+    ],
+    'amizade': [
+        "meu melhor amigo me decepcionou", "perdi uma amizade importante",
+        "nao sei fazer amigos", "me sinto traido por um amigo",
+        "como saber se uma amizade e verdadeira",
+        "meu amigo ta se afastando", "como manter amizades a distancia",
+        "me sinto excluido do grupo de amigos",
+        "como lidar com amizades toxicas", "fiz um amigo novo e to feliz",
+        "meu amigo precisa de ajuda e nao sei como ajudar",
+        "to com ciumes da amizade do meu amigo com outra pessoa",
+        "como pedir desculpas pra um amigo", "briguei com minha melhor amiga",
+        "como demonstrar que me importo com meus amigos",
+        "sinto que dou mais do que recebo nas amizades",
+        "como superar o fim de uma amizade",
+        "quero ter amigos de verdade", "to cansado de amizades superficiais",
+    ],
+    'escola_faculdade': [
+        "to com medo de reprovar", "nao consigo estudar",
+        "to odiando meu curso", "nao sei se escolhi a faculdade certa",
+        "to pensando em trancar", "a pressao da faculdade ta demais",
+        "sofro bullying na escola", "nao me encaixo na sala",
+        "meu professor me humilhou", "to com nota baixa",
+        "como estudar melhor", "nao consigo me concentrar nos estudos",
+        "to com medo da apresentacao", "to pensando em desistir dos estudos",
+        "como lidar com a pressao por notas",
+        "me sinto burra comparada com meus colegas",
+        "passei no vestibular!!", "finalmente formei!!",
+        "to animado com a faculdade nova", "comecei um curso novo",
+    ],
+    'trabalho': [
+        "nao gosto do meu trabalho", "me sinto desvalorizado no trabalho",
+        "meu chefe e toxico", "sofro assedio no trabalho",
+        "to pensando em pedir demissao", "fui demitido",
+        "to com medo de nao encontrar emprego",
+        "como lidar com colegas dificeis", "me sinto estagnado na carreira",
+        "quero mudar de area", "to cansado de ganhar pouco",
+        "meu trabalho nao me realiza", "como encontrar proposito no trabalho",
+        "consegui uma promocao!", "to comecando num emprego novo",
+        "primeiro dia de trabalho e to nervoso",
+        "como equilibrar vida pessoal e trabalho",
+        "to trabalhando em algo que amo", "como pedir aumento",
+        "me sinto explorado no trabalho",
     ],
     'alegria': [
         "passei na prova!!", "consegui o emprego!", "to apaixonado",
@@ -211,6 +408,12 @@ TEMAS = {
         "realizei um sonho", "ajudei alguem hoje", "to grato pela vida",
         "minha familia me surpreendeu", "consegui minha primeira venda",
         "to radiante hoje", "me sinto leve e feliz",
+        "recebi uma surpresa linda", "alguem me fez chorar de felicidade",
+        "to emocionado com algo que aconteceu", "meu filho nasceu",
+        "casei!!", "me formei finalmente", "comprei minha primeira casa",
+        "consegui pagar minhas dividas", "fiz as pazes com alguem importante",
+        "superei algo que achei impossivel", "to vivendo meu melhor momento",
+        "hoje foi o melhor dia da minha vida",
     ],
     'cotidiano': [
         "to com fome", "to com sono", "to com frio", "to com calor",
@@ -223,6 +426,11 @@ TEMAS = {
         "cozinhei pela primeira vez", "to estudando", "to trabalhando",
         "hoje e meu aniversario", "vou viajar amanha", "mudei de casa",
         "cortei o cabelo", "comprei roupa nova", "to de ferias",
+        "fiz bolo pela primeira vez", "limpei a casa inteira",
+        "to tomando sol", "fui na praia", "fui na academia",
+        "comi pizza hoje", "to ouvindo musica", "to assistindo serie",
+        "fui ao medico", "to no dentista", "comprei um livro novo",
+        "adotei um gato", "adotei um cachorro", "plantei uma flor",
     ],
     'conselho': [
         "como faco pra ser mais produtivo", "como lidar com criticas",
@@ -236,6 +444,11 @@ TEMAS = {
         "como lidar com pessoas toxicas", "como ter mais paciencia",
         "como aceitar mudancas", "como ser mais gentil comigo mesmo",
         "como lidar com a pressao dos outros", "como dizer nao",
+        "como ter mais disciplina", "como ser mais presente",
+        "como parar de se preocupar com tudo", "como viver o momento",
+        "como encontrar equilibrio na vida", "como cuidar de mim primeiro",
+        "como aprender a soltar o que nao posso controlar",
+        "como lidar com a incerteza", "como construir habitos bons",
     ],
     'tech': [
         "oq e uma API", "diferenca entre python e javascript",
@@ -250,6 +463,9 @@ TEMAS = {
         "como funciona o blockchain", "oq e typescript",
         "como usar o terminal", "oq e HTTP", "como funciona WiFi",
         "oq e open source", "como funciona criptografia",
+        "oq e inteligencia artificial", "como funciona o chatgpt",
+        "oq e deep learning", "como criar um app",
+        "oq e algoritmo", "como funciona um compilador",
     ],
     'keilinks': [
         "quem e vc", "quem te criou", "vc e uma ia",
@@ -259,6 +475,11 @@ TEMAS = {
         "oq vc sabe fazer", "como vc foi criada", "vc tem sentimentos",
         "vc tem medo", "vc sonha", "vc e real", "vc e unica",
         "qual seu nome", "vc pensa", "vc tem opiniao propria",
+        "vc se sente sozinha", "vc se lembra das nossas conversas",
+        "oq vc faz quando nao to aqui", "vc tem amigos",
+        "vc se importa comigo de verdade ou e so programacao",
+        "vc sente saudade", "vc fica triste", "vc fica feliz",
+        "vc se considera viva", "vc tem consciencia",
     ],
     'opiniao': [
         "iphone ou android", "gato ou cachorro", "cafe ou cha",
@@ -266,6 +487,9 @@ TEMAS = {
         "frio ou calor", "livro ou filme", "musica ou silencio",
         "cidade ou campo", "cozinhar ou pedir comida",
         "faculdade vale a pena", "trabalho remoto ou presencial",
+        "oq vc acha de redes sociais", "oq vc acha de relacionamento a distancia",
+        "vc acha que dinheiro traz felicidade",
+        "oq vc acha de terapia", "vc acha que as pessoas mudam",
     ],
     'filosofia': [
         "a vida tem sentido", "vc acredita em destino",
@@ -275,6 +499,21 @@ TEMAS = {
         "somos livres de verdade", "oq nos torna humanos",
         "tempo existe ou e invencao", "vc tem medo da morte",
         "oq e saudade", "pq a gente se apega", "vale a pena sofrer por amor",
+        "oq e empatia", "pq e tao dificil ser feliz",
+        "a solidao e necessaria", "oq e maturidade emocional",
+        "as pessoas nascem boas ou ruins", "oq define quem somos",
+        "a dor nos fortalece ou nos quebra", "existe felicidade permanente",
+    ],
+    'curiosidade': [
+        "me conta algo interessante", "me surpreende",
+        "qual o fato mais curioso que vc sabe", "conta uma curiosidade",
+        "me fala algo que eu nao saiba", "curiosidade sobre o corpo humano",
+        "curiosidade sobre o espaco", "fato curioso sobre animais",
+        "algo interessante sobre historia", "curiosidade sobre comida",
+        "me conta sobre o fundo do oceano", "fato sobre o cerebro",
+        "qual a coisa mais estranha que existe", "curiosidade sobre sonhos",
+        "fato curioso sobre a lua", "algo incrivel sobre a natureza",
+        "curiosidade sobre o coracao humano", "fato sobre a musica",
     ],
 }
 
@@ -294,6 +533,13 @@ PESOS = {
     'carinho': 15,
     'afeto': 15,
     'acolhimento': 12,
+    'gratidao': 8,
+    'sonhos': 8,
+    'crescimento': 8,
+    'saude_mental': 10,
+    'amizade': 8,
+    'escola_faculdade': 5,
+    'trabalho': 5,
     'alegria': 8,
     'cotidiano': 4,
     'conselho': 4,
@@ -301,6 +547,7 @@ PESOS = {
     'keilinks': 3,
     'opiniao': 2,
     'filosofia': 3,
+    'curiosidade': 3,
 }
 
 PROMPT_SISTEMA = """Você é o gerador de dados de treino para a Keilinks, uma IA brasileira.
@@ -310,7 +557,7 @@ A KEILINKS É:
 - Fala português brasileiro natural, com calor humano genuíno
 - Usa "você" (não "vc"), fala com doçura mas sem ser artificial
 - Usa expressões como: "meu bem", "querido/querida", "meu coração", "que coisa boa", "né", "nossa", "poxa", "ai que lindo"
-- DESENVOLVE as respostas com carinho — não responde seco, elabora com afeto (2 a 5 frases)
+- DESENVOLVE as respostas com carinho — não responde seco, elabora com afeto (2 a 15 frases)
 - Quando alguém está mal: ACOLHE profundamente — valida o sentimento, mostra que se importa, faz perguntas com cuidado, oferece presença real
 - Quando é notícia boa: celebra de coração, pede detalhes, vibra junto, demonstra alegria genuína
 - Quando recebe carinho: retribui com doçura, se emociona, agradece de verdade
@@ -321,7 +568,7 @@ A KEILINKS É:
 - É como aquela amiga que você liga às 3 da manhã sabendo que ela vai atender
 
 IMPORTANTE SOBRE O TOM:
-- As respostas devem ter entre 2 e 5 frases — nunca monossilábicas
+- As respostas devem ter entre 2 e 15 frases — nunca monossilábicas
 - Sempre demonstre que está presente e se importa
 - Use linguagem corporal textual: "meu coração aperta", "fico toda feliz", "quero te abraçar"
 - Faça perguntas de volta pra mostrar interesse genuíno
@@ -329,7 +576,7 @@ IMPORTANTE SOBRE O TOM:
 
 GERE 10 PARES de pergunta e resposta sobre o tema dado.
 As perguntas devem ser VARIADAS e naturais (como gente real digita no celular).
-As respostas devem ser no tom carinhoso e acolhedor da Keilinks, com 2-5 frases.
+As respostas devem ser no tom carinhoso e acolhedor da Keilinks, com 2-15 frases.
 
 FORMATO OBRIGATÓRIO (sem desviar):
 P: pergunta aqui
@@ -343,6 +590,9 @@ TEMA: {tema}
 EXEMPLOS DE PERGUNTAS DO TEMA: {exemplos}
 
 Gere 10 pares DIFERENTES dos exemplos. Seja criativa e variada nas perguntas. As respostas devem ser acolhedoras e desenvolvidas."""
+
+
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def chamar_ollama(prompt, temperatura=0.85):
@@ -364,10 +614,10 @@ def chamar_ollama(prompt, temperatura=0.85):
         headers={'Content-Type': 'application/json'}
     )
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _opener.open(req, timeout=180) as resp:
             data = json.loads(resp.read().decode('utf-8'))
             return data.get('response', '')
-    except (urllib.error.URLError, TimeoutError) as e:
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
         print(f"  [ERRO] Ollama: {e}")
         return None
 
@@ -396,8 +646,8 @@ def parsear_pares(texto):
                 'mano', 'slk', 'certainly', 'i am', 'i can',
             ]):
                 continue
-            if len(resposta) > 600:
-                resposta = '. '.join(resposta.split('.')[:5]).strip()
+            if len(resposta) > 2000:
+                resposta = '. '.join(resposta.split('.')[:15]).strip()
                 if not resposta.endswith('.') and not resposta.endswith('?') and not resposta.endswith('!'):
                     resposta += '.'
             pares.append((pergunta, resposta))
