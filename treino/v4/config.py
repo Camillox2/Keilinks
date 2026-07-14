@@ -2,7 +2,7 @@
 
 O perfil recomendado para pré-treino completo numa RTX 5050 Laptop de 8 GB
 é o ``core_380m``. Perfis acima de 500M exigem benchmark local, checkpointing
-agressivo e possivelmente otimizador de 8 bits/offload.
+agressivo e possivelmente offload.
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class TrainConfig:
     compile_mode: str = "reduce-overhead"
     checkpoint_mode: str = "selective"
     checkpoint_every: int = 2
-    optimizer: str = "adamw_fused"
+    optimizer: str = "adamw_8bit"
     precision: str = "bf16"
     num_workers: int = 2
     prefetch_factor: int = 3
@@ -90,12 +90,14 @@ TRAIN_PROFILES: Dict[str, TrainConfig] = {
         micro_batch_size=1, grad_accum_steps=16,
         max_steps=160_000, learning_rate=3e-4, min_learning_rate=3e-5,
         warmup_steps=2_000, checkpoint_mode="selective", checkpoint_every=2,
+        optimizer="adamw_8bit",
     ),
     "rtx5050_500m": TrainConfig(
         profile="rtx5050_500m", phase="pretrain",
         micro_batch_size=1, grad_accum_steps=24,
         max_steps=180_000, learning_rate=2.5e-4, min_learning_rate=2.5e-5,
         warmup_steps=2_500, checkpoint_mode="full", checkpoint_every=1,
+        optimizer="adamw_8bit",
     ),
     "rtx5050_800m": TrainConfig(
         profile="rtx5050_800m", phase="pretrain",
@@ -111,6 +113,7 @@ TRAIN_PROFILES: Dict[str, TrainConfig] = {
         warmup_steps=200, weight_decay=0.05,
         eval_interval=100, save_interval=500,
         checkpoint_mode="selective", checkpoint_every=2,
+        optimizer="adamw_8bit",
     ),
     "rtx5050_sft_500m": TrainConfig(
         profile="rtx5050_sft_500m", phase="sft",
@@ -119,6 +122,7 @@ TRAIN_PROFILES: Dict[str, TrainConfig] = {
         warmup_steps=250, weight_decay=0.05,
         eval_interval=100, save_interval=500,
         checkpoint_mode="full", checkpoint_every=1,
+        optimizer="adamw_8bit",
     ),
 }
 
@@ -127,7 +131,9 @@ def get_model_config(name: str) -> ModelConfig:
     try:
         config = MODEL_PROFILES[name]
     except KeyError as exc:
-        raise KeyError(f"Modelo desconhecido: {name}. Opções: {list(MODEL_PROFILES)}") from exc
+        raise KeyError(
+            f"Modelo desconhecido: {name}. Opções: {list(MODEL_PROFILES)}"
+        ) from exc
     config.validate()
     return config
 
@@ -136,4 +142,6 @@ def get_train_config(name: str) -> TrainConfig:
     try:
         return TRAIN_PROFILES[name]
     except KeyError as exc:
-        raise KeyError(f"Perfil desconhecido: {name}. Opções: {list(TRAIN_PROFILES)}") from exc
+        raise KeyError(
+            f"Perfil desconhecido: {name}. Opções: {list(TRAIN_PROFILES)}"
+        ) from exc
