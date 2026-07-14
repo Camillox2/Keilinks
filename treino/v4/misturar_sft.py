@@ -1,16 +1,18 @@
 """Cria um mix SFT balanceado e reproduzível.
 
-Impede que dados sintéticos ou traduções automáticas dominem o ajuste.
+Impede que dados sintéticos ou traduções automáticas dominem o ajuste, mesmo
+quando há poucos exemplos humanos disponíveis.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import math
 import random
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Sequence
 
 from treino.v4.dataset import canonical_conversation, extract_messages, validate_messages
 
@@ -34,8 +36,16 @@ def load_records(path: Path, source_name: str) -> List[dict]:
                 continue
             record = dict(record)
             record["messages"] = messages
-            record.setdefault("source", source_name)
+            if not record.get("source"):
+                record["source"] = source_name
             records.append(record)
+    return records
+
+
+def load_many(paths: Sequence[Path], source_name: str) -> List[dict]:
+    records: List[dict] = []
+    for path in paths:
+        records.extend(load_records(path, source_name))
     return records
 
 
@@ -53,44 +63,82 @@ def deduplicate(records: Iterable[dict]) -> List[dict]:
 
 
 def take_random(records: List[dict], maximum: int, rng: random.Random) -> List[dict]:
-    if maximum < 0 or len(records) <= maximum:
+    if maximum <= 0:
+        return []
+    if len(records) <= maximum:
         return list(records)
     return rng.sample(records, maximum)
 
 
+def cap_group_ratio(records: List[dict], predicate, ratio: float,
+                    rng: random.Random) -> List[dict]:
+    """Garante count_grupo / count_total <= ratio sem depender de max_examples."""
+    if ratio <= 0:
+        return [record for record in records if not predicate(record)]
+    if ratio >= 1:
+        return records
+    group = [record for record in records if predicate(record)]
+    others = [record for record in records if not predicate(record)]
+    if not group or not others:
+        return others if group and not others else records
+    maximum = math.floor((ratio / (1.0 - ratio)) * len(others))
+    return others + take_random(group, maximum, rng)
+
+
 def build_mix(args: argparse.Namespace) -> dict:
     rng = random.Random(args.seed)
+    curated_paths = [Path(value.strip()) for value in args.curated.split(",") if value.strip()]
     sources: Dict[str, List[dict]] = {
-        "curated": load_records(Path(args.curated), "keilinks_curated_v4"),
+        "curated": load_many(curated_paths, "keilinks_curated_v4"),
         "oasst2": load_records(Path(args.oasst2), "oasst2_portuguese"),
         "alpaca": load_records(Path(args.alpaca), "alpaca_ptbr"),
         "dolly": load_records(Path(args.dolly), "dolly_ptbr"),
         "synthetic": load_records(Path(args.synthetic), "synthetic_ollama_v4"),
     }
+    sources = {name: deduplicate(records) for name, records in sources.items()}
     max_total = max(1, args.max_examples)
-    synthetic_cap = int(max_total * args.synthetic_ratio)
-    translation_cap_each = int(max_total * args.translation_ratio_each)
 
-    selected = []
+    selected: List[dict] = []
     selected.extend(sources["curated"])
     selected.extend(sources["oasst2"])
-    selected.extend(take_random(sources["alpaca"], translation_cap_each, rng))
-    selected.extend(take_random(sources["dolly"], translation_cap_each, rng))
-
+    selected.extend(take_random(
+        sources["alpaca"], int(max_total * args.translation_ratio_each), rng
+    ))
+    selected.extend(take_random(
+        sources["dolly"], int(max_total * args.translation_ratio_each), rng
+    ))
+    selected.extend(take_random(
+        sources["synthetic"], int(max_total * args.synthetic_ratio), rng
+    ))
     selected = deduplicate(selected)
-    human_budget = max(0, max_total - synthetic_cap)
-    if len(selected) > human_budget:
-        curated_ids = {record.get("id") for record in sources["curated"]}
-        anchors = [record for record in selected if record.get("id") in curated_ids]
-        remainder = [record for record in selected if record.get("id") not in curated_ids]
-        selected = anchors + take_random(remainder, max(0, human_budget - len(anchors)), rng)
 
-    remaining = max(0, max_total - len(selected))
-    synthetic_limit = min(synthetic_cap, remaining)
-    selected.extend(take_random(sources["synthetic"], synthetic_limit, rng))
+    selected = cap_group_ratio(
+        selected,
+        lambda record: str(record.get("source", "")) == "synthetic_ollama_v4",
+        args.synthetic_ratio,
+        rng,
+    )
+    selected = cap_group_ratio(
+        selected,
+        lambda record: str(record.get("source", "")) == "alpaca_ptbr",
+        args.translation_ratio_each,
+        rng,
+    )
+    selected = cap_group_ratio(
+        selected,
+        lambda record: str(record.get("source", "")) == "dolly_ptbr",
+        args.translation_ratio_each,
+        rng,
+    )
     selected = deduplicate(selected)
+
+    if len(selected) > max_total:
+        curated = [record for record in selected if str(record.get("source", "")).startswith("keilinks_curated")]
+        other = [record for record in selected if record not in curated]
+        selected = curated[:max_total]
+        selected.extend(take_random(other, max_total - len(selected), rng))
+
     rng.shuffle(selected)
-
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     counts = Counter()
@@ -101,15 +149,20 @@ def build_mix(args: argparse.Namespace) -> dict:
             categories[str(record.get("category", "general"))] += 1
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    total = max(len(selected), 1)
     report = {
         "output": str(output),
         "seed": args.seed,
         "max_examples": max_total,
         "synthetic_ratio_cap": args.synthetic_ratio,
         "translation_ratio_each_cap": args.translation_ratio_each,
+        "curated_paths": [str(path) for path in curated_paths],
         "available": {name: len(records) for name, records in sources.items()},
         "selected_total": len(selected),
         "selected_by_source": dict(counts),
+        "selected_ratio_by_source": {
+            source: round(count / total, 6) for source, count in counts.items()
+        },
         "selected_by_category": dict(categories),
     }
     manifest = output.with_suffix(".manifest.json")
@@ -120,7 +173,11 @@ def build_mix(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Mix balanceado de SFT")
-    parser.add_argument("--curated", default="dados/v4/seed_conversas.jsonl")
+    parser.add_argument(
+        "--curated",
+        default="dados/v4/conversas_curadas_v4.jsonl,dados/v4/seed_conversas.jsonl",
+        help="Lista de JSONL curados separada por vírgula.",
+    )
     parser.add_argument("--oasst2", default="dados/v4/sft/oasst2_pt.jsonl")
     parser.add_argument("--alpaca", default="dados/v4/sft/alpaca_ptbr.jsonl")
     parser.add_argument("--dolly", default="dados/v4/sft/dolly_ptbr.jsonl")
