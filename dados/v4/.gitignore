@@ -1,8 +1,13 @@
 # Dados grandes são reproduzidos localmente pelo pipeline V4.
 raw/
 pretrain/
+pretrain_binary/
 sft/
 packed/
 candidates/
 manifests/*.json
+*.tmp
+*.bin
 !seed_conversas.example.jsonl
+!eval/
+!eval/*.jsonl
