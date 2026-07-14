@@ -6,6 +6,7 @@ __pycache__/
 # Virtual environment
 venv/
 .venv/
+.venv-v4/
 env/
 ENV/
 
@@ -45,6 +46,7 @@ checkpoints/
 *.pt
 *.pth
 *.ckpt
+*.bin
 
 # Dados gerados (JSONs grandes, histórico, logs gerados)
 dados/*.json
