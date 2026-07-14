@@ -1,15 +1,33 @@
 name: Keilinks V4 smoke
+
 on:
   push:
     branches: [keilinks-v4-training]
   pull_request:
-    paths: ['treino/v4/**', 'busca/web_v4.py', 'api/servidor_v4.py']
+    paths:
+      - 'treino/v4/**'
+      - 'busca/web_v4.py'
+      - 'api/runtime_v4.py'
+      - 'api/servidor_v4.py'
+      - 'dados/v4/conversas_curadas_v4.jsonl'
+
+permissions:
+  contents: read
+
 jobs:
-  syntax:
+  syntax-and-data:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m compileall -q treino/v4 busca/web_v4.py api/servidor_v4.py
+      - name: Compile Python
+        run: >-
+          python -m compileall -q treino/v4 busca/web_v4.py
+          api/runtime_v4.py api/servidor_v4.py
+      - name: Validate curated conversations
+        run: >-
+          python -m treino.v4.validar_conversas
+          --input dados/v4/conversas_curadas_v4.jsonl
+          --min-multiturn-ratio 1.0
