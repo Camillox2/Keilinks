@@ -1,8 +1,8 @@
 """Configurações da Keilinks V4.
 
-Os perfis maiores existem para evolução do projeto, mas o perfil recomendado para
-pré-treino completo numa RTX 5050 Laptop de 8 GB é o ``core_380m``. Os perfis
-acima de 500M exigem checkpointing agressivo, batch 1 e possivelmente offload.
+O perfil recomendado para pré-treino completo numa RTX 5050 Laptop de 8 GB
+é o ``core_380m``. Perfis acima de 500M exigem benchmark local, checkpointing
+agressivo e possivelmente otimizador de 8 bits/offload.
 """
 from __future__ import annotations
 
@@ -31,6 +31,8 @@ class ModelConfig:
             raise ValueError("n_heads deve ser divisível por n_kv_heads")
         if self.ff_dim <= self.dim:
             raise ValueError("ff_dim deve ser maior que dim")
+        if self.context_length < 128:
+            raise ValueError("context_length muito pequeno")
 
     def to_dict(self) -> dict:
         self.validate()
@@ -40,6 +42,7 @@ class ModelConfig:
 @dataclass(frozen=True)
 class TrainConfig:
     profile: str
+    phase: str
     micro_batch_size: int
     grad_accum_steps: int
     max_steps: int
@@ -83,20 +86,39 @@ MODEL_PROFILES: Dict[str, ModelConfig] = {
 
 TRAIN_PROFILES: Dict[str, TrainConfig] = {
     "rtx5050_380m": TrainConfig(
-        profile="rtx5050_380m", micro_batch_size=1, grad_accum_steps=16,
+        profile="rtx5050_380m", phase="pretrain",
+        micro_batch_size=1, grad_accum_steps=16,
         max_steps=160_000, learning_rate=3e-4, min_learning_rate=3e-5,
         warmup_steps=2_000, checkpoint_mode="selective", checkpoint_every=2,
     ),
     "rtx5050_500m": TrainConfig(
-        profile="rtx5050_500m", micro_batch_size=1, grad_accum_steps=24,
+        profile="rtx5050_500m", phase="pretrain",
+        micro_batch_size=1, grad_accum_steps=24,
         max_steps=180_000, learning_rate=2.5e-4, min_learning_rate=2.5e-5,
         warmup_steps=2_500, checkpoint_mode="full", checkpoint_every=1,
     ),
     "rtx5050_800m": TrainConfig(
-        profile="rtx5050_800m", micro_batch_size=1, grad_accum_steps=32,
+        profile="rtx5050_800m", phase="pretrain",
+        micro_batch_size=1, grad_accum_steps=32,
         max_steps=220_000, learning_rate=2e-4, min_learning_rate=2e-5,
         warmup_steps=3_000, checkpoint_mode="full", checkpoint_every=1,
         optimizer="adamw_8bit",
+    ),
+    "rtx5050_sft_380m": TrainConfig(
+        profile="rtx5050_sft_380m", phase="sft",
+        micro_batch_size=1, grad_accum_steps=16,
+        max_steps=10_000, learning_rate=5e-5, min_learning_rate=5e-6,
+        warmup_steps=200, weight_decay=0.05,
+        eval_interval=100, save_interval=500,
+        checkpoint_mode="selective", checkpoint_every=2,
+    ),
+    "rtx5050_sft_500m": TrainConfig(
+        profile="rtx5050_sft_500m", phase="sft",
+        micro_batch_size=1, grad_accum_steps=24,
+        max_steps=12_000, learning_rate=4e-5, min_learning_rate=4e-6,
+        warmup_steps=250, weight_decay=0.05,
+        eval_interval=100, save_interval=500,
+        checkpoint_mode="full", checkpoint_every=1,
     ),
 }
 
