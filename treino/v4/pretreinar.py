@@ -56,14 +56,20 @@ def iter_documents(path: Path) -> Iterator[str]:
 
 
 def split_document(text: str, validation_ratio: float) -> str:
-    digest = hashlib.blake2b(text[:4000].encode("utf-8"), digest_size=8).digest()
+    digest = hashlib.blake2b(
+        text[:4000].encode("utf-8"), digest_size=8
+    ).digest()
     value = int.from_bytes(digest, "big") / float(2**64 - 1)
     return "validation" if value < validation_ratio else "train"
 
 
-def tokenize_to_binary(input_path: Path, tokenizer: TokenizadorV4,
-                       vocab_path: Path, output_dir: Path,
-                       validation_ratio: float = 0.005) -> dict:
+def tokenize_to_binary(
+    input_path: Path,
+    tokenizer: TokenizadorV4,
+    vocab_path: Path,
+    output_dir: Path,
+    validation_ratio: float = 0.005,
+) -> dict:
     if not input_path.exists():
         raise FileNotFoundError(input_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -80,7 +86,10 @@ def tokenize_to_binary(input_path: Path, tokenizer: TokenizadorV4,
     }
     eos_id = tokenizer.vocab["<fim>"]
     try:
-        with train_temp.open("wb") as train_handle, validation_temp.open("wb") as validation_handle:
+        with (
+            train_temp.open("wb") as train_handle,
+            validation_temp.open("wb") as validation_handle,
+        ):
             for document in iter_documents(input_path):
                 if len(document) < 100:
                     counts["rejected"] += 1
@@ -91,16 +100,22 @@ def tokenize_to_binary(input_path: Path, tokenizer: TokenizadorV4,
                     counts["rejected"] += 1
                     continue
                 array = np.asarray(tokens + [eos_id], dtype=np.int32)
-                target = validation_handle if split == "validation" else train_handle
+                target = (
+                    validation_handle if split == "validation" else train_handle
+                )
                 target.write(array.tobytes())
                 counts[split] += len(array)
                 counts["documents"] += 1
                 if counts["documents"] % 10_000 == 0:
                     total = counts["train"] + counts["validation"]
-                    print(f"{counts['documents']:,} docs | {total/1e9:.3f}B tokens")
+                    print(
+                        f"{counts['documents']:,} docs | "
+                        f"{total/1e9:.3f}B tokens"
+                    )
         if counts["train"] < 10_000 or counts["validation"] < 2_048:
             raise ValueError(
-                "Corpus ou validação muito pequeno. Aumente os dados antes do pré-treino."
+                "Corpus ou validação muito pequeno. "
+                "Aumente os dados antes do pré-treino."
             )
         metadata = {
             "format": "keilinks-pretrain-v4",
@@ -114,7 +129,9 @@ def tokenize_to_binary(input_path: Path, tokenizer: TokenizadorV4,
             "validation_ratio": validation_ratio,
             **counts,
         }
-        metadata_temp.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        metadata_temp.write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
         os.replace(train_temp, train_final)
         os.replace(validation_temp, validation_final)
         os.replace(metadata_temp, output_dir / "metadata.json")
@@ -125,35 +142,57 @@ def tokenize_to_binary(input_path: Path, tokenizer: TokenizadorV4,
         raise
 
 
-def validate_binary_metadata(metadata_path: Path, vocab_path: Path,
-                             tokenizer: TokenizadorV4) -> dict:
+def validate_binary_metadata(
+    metadata_path: Path,
+    vocab_path: Path,
+    tokenizer: TokenizadorV4,
+) -> dict:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     if metadata.get("format") != "keilinks-pretrain-v4":
         raise ValueError("Formato dos binários não é V4")
     if metadata.get("vocab_sha256") != sha256_file(vocab_path):
-        raise ValueError("Vocabulário mudou. Execute novamente com --rebuild-binary")
+        raise ValueError(
+            "Vocabulário mudou. Execute novamente com --rebuild-binary"
+        )
     if int(metadata.get("vocab_size", -1)) != tokenizer.tam_vocab:
-        raise ValueError("Tamanho do vocabulário incompatível com os binários")
+        raise ValueError(
+            "Tamanho do vocabulário incompatível com os binários"
+        )
     return metadata
 
 
 class TokenMemmap:
     def __init__(self, path: Path) -> None:
-        if not path.exists() or path.stat().st_size % np.dtype(np.int32).itemsize:
+        if (
+            not path.exists()
+            or path.stat().st_size % np.dtype(np.int32).itemsize
+        ):
             raise ValueError(f"Binário inválido: {path}")
         self.length = path.stat().st_size // np.dtype(np.int32).itemsize
-        self.data = np.memmap(path, dtype=np.int32, mode="r", shape=(self.length,))
+        self.data = np.memmap(
+            path, dtype=np.int32, mode="r", shape=(self.length,)
+        )
 
-    def sample(self, rng: np.random.Generator, batch_size: int,
-               context: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def sample(
+        self,
+        rng: np.random.Generator,
+        batch_size: int,
+        context: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         if self.length <= context + 1:
             raise ValueError("Corpus menor que o contexto")
         starts = rng.integers(
-            0, self.length - context - 1,
-            size=batch_size, dtype=np.int64,
+            0,
+            self.length - context - 1,
+            size=batch_size,
+            dtype=np.int64,
         )
-        x = np.stack([self.data[start:start + context] for start in starts])
-        y = np.stack([self.data[start + 1:start + context + 1] for start in starts])
+        x = np.stack(
+            [self.data[start:start + context] for start in starts]
+        )
+        y = np.stack(
+            [self.data[start + 1:start + context + 1] for start in starts]
+        )
         return (
             torch.from_numpy(x.astype(np.int64, copy=False)),
             torch.from_numpy(y.astype(np.int64, copy=False)),
@@ -161,13 +200,21 @@ class TokenMemmap:
 
 
 @torch.no_grad()
-def evaluate(model: KeilinksV4, corpus: TokenMemmap,
-             rng: np.random.Generator, device: torch.device,
-             config: TrainConfig, context: int, batches: int = 20) -> float:
+def evaluate(
+    model: KeilinksV4,
+    corpus: TokenMemmap,
+    rng: np.random.Generator,
+    device: torch.device,
+    config: TrainConfig,
+    context: int,
+    batches: int = 20,
+) -> float:
     model.eval()
     losses = []
     for _ in range(batches):
-        x, y = corpus.sample(rng, config.micro_batch_size, context)
+        x, y = corpus.sample(
+            rng, config.micro_batch_size, context
+        )
         x = x.to(device, non_blocking=True)
         y = y.to(device, non_blocking=True)
         with autocast_context(device, config.precision):
@@ -186,25 +233,44 @@ def checkpoint_config(checkpoint: dict) -> ModelConfig:
     return config
 
 
-def validate_resume(requested: ModelConfig, loaded: ModelConfig,
-                    checkpoint_path: Path) -> None:
+def validate_resume(
+    requested: ModelConfig,
+    loaded: ModelConfig,
+    checkpoint_path: Path,
+) -> None:
     fields = (
-        "vocab_size", "dim", "n_layers", "n_heads",
-        "n_kv_heads", "ff_dim", "context_length",
+        "vocab_size",
+        "dim",
+        "n_layers",
+        "n_heads",
+        "n_kv_heads",
+        "ff_dim",
+        "context_length",
     )
-    different = [field for field in fields if getattr(requested, field) != getattr(loaded, field)]
+    different = [
+        field
+        for field in fields
+        if getattr(requested, field) != getattr(loaded, field)
+    ]
     if different:
         raise ValueError(
-            f"Checkpoint {checkpoint_path} incompatível nos campos: {different}"
+            f"Checkpoint {checkpoint_path} incompatível nos campos: "
+            f"{different}"
         )
 
 
 def pretrain(args: argparse.Namespace) -> None:
     train_config = get_train_config(args.profile)
     if train_config.phase != "pretrain":
-        raise ValueError(f"Perfil {args.profile} é de {train_config.phase}, não de pré-treino")
+        raise ValueError(
+            f"Perfil {args.profile} é de {train_config.phase}, "
+            "não de pré-treino"
+        )
     if args.steps is not None:
-        train_config = TrainConfig(**{**asdict(train_config), "max_steps": args.steps})
+        train_config = TrainConfig(**{
+            **asdict(train_config),
+            "max_steps": args.steps,
+        })
 
     vocab_path = Path(args.vocab)
     tokenizer = TokenizadorV4(vocab_path)
@@ -218,21 +284,30 @@ def pretrain(args: argparse.Namespace) -> None:
     metadata_path = binary_dir / "metadata.json"
     if args.rebuild_binary or not metadata_path.exists():
         metadata = tokenize_to_binary(
-            Path(args.input), tokenizer, vocab_path, binary_dir,
+            Path(args.input),
+            tokenizer,
+            vocab_path,
+            binary_dir,
             args.validation_ratio,
         )
     else:
-        metadata = validate_binary_metadata(metadata_path, vocab_path, tokenizer)
+        metadata = validate_binary_metadata(
+            metadata_path, vocab_path, tokenizer
+        )
     print(json.dumps(metadata, ensure_ascii=False, indent=2))
     if args.prepare_only:
         return
 
     train_corpus = TokenMemmap(binary_dir / "train_tokens.bin")
-    validation_corpus = TokenMemmap(binary_dir / "validation_tokens.bin")
+    validation_corpus = TokenMemmap(
+        binary_dir / "validation_tokens.bin"
+    )
     seed_everything(train_config.seed)
     rng = np.random.default_rng(train_config.seed)
     eval_rng = np.random.default_rng(train_config.seed + 1)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
     torch.set_float32_matmul_precision("high")
     if device.type == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -241,39 +316,59 @@ def pretrain(args: argparse.Namespace) -> None:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    resume_path = Path(args.resume) if args.resume else output_dir / "pretrain_latest.pt"
+    resume_path = (
+        Path(args.resume)
+        if args.resume
+        else output_dir / "pretrain_latest.pt"
+    )
     checkpoint = None
     start_step = 0
     best_val = math.inf
     if resume_path.exists():
-        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+        checkpoint = torch.load(
+            resume_path,
+            map_location="cpu",
+            weights_only=False,
+        )
         if checkpoint.get("phase") not in (None, "pretrain"):
-            raise ValueError(f"{resume_path} não é checkpoint de pré-treino")
+            raise ValueError(
+                f"{resume_path} não é checkpoint de pré-treino"
+            )
         loaded_config = checkpoint_config(checkpoint)
         validate_resume(model_config, loaded_config, resume_path)
         model_config = loaded_config
 
-    model = KeilinksV4(model_config).to(device)
+    model = KeilinksV4(model_config)
+    if checkpoint is not None:
+        model.load_state_dict(checkpoint["model"], strict=True)
+    model.to(device)
     model.set_gradient_checkpointing(
         train_config.checkpoint_mode,
         train_config.checkpoint_every,
     )
-    if checkpoint is not None:
-        model.load_state_dict(checkpoint["model"], strict=True)
 
     optimizer = build_optimizer(model, train_config, device)
     if checkpoint is not None:
         if "optimizer" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer"])
         start_step = int(checkpoint.get("step", 0)) + 1
-        best_val = float(checkpoint.get("best_validation_loss", math.inf))
+        best_val = float(
+            checkpoint.get("best_validation_loss", math.inf)
+        )
         print(f"Retomando pré-treino do passo {start_step}")
+    del checkpoint
 
     executable = model
-    if not args.no_compile and hasattr(torch, "compile") and device.type == "cuda":
+    if (
+        not args.no_compile
+        and hasattr(torch, "compile")
+        and device.type == "cuda"
+    ):
         try:
             executable = torch.compile(
-                model, mode=train_config.compile_mode, fullgraph=False
+                model,
+                mode=train_config.compile_mode,
+                fullgraph=False,
             )
             print(f"torch.compile ativo: {train_config.compile_mode}")
         except Exception as exc:
@@ -281,7 +376,10 @@ def pretrain(args: argparse.Namespace) -> None:
 
     scaler = torch.amp.GradScaler(
         "cuda",
-        enabled=device.type == "cuda" and not torch.cuda.is_bf16_supported(),
+        enabled=(
+            device.type == "cuda"
+            and not torch.cuda.is_bf16_supported()
+        ),
     )
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -292,11 +390,16 @@ def pretrain(args: argparse.Namespace) -> None:
     micro_window = 0
     last_log = time.perf_counter()
     print(
-        f"{model_config.name} | {model.parameter_count()/1e6:.1f}M | "
+        f"{model_config.name} | "
+        f"{model.parameter_count()/1e6:.1f}M | "
         f"corpus {train_corpus.length/1e9:.3f}B tokens | {device}"
     )
 
-    def save(name: str, step: int, include_optimizer: bool) -> None:
+    def save(
+        name: str,
+        step: int,
+        include_optimizer: bool,
+    ) -> None:
         extra = {
             "best_validation_loss": best_val,
             "model_profile": args.model,
@@ -307,27 +410,41 @@ def pretrain(args: argparse.Namespace) -> None:
         }
         if include_optimizer:
             extra["optimizer"] = optimizer.state_dict()
-        atomic_save(model.checkpoint_payload(step, **extra), output_dir / name)
+        atomic_save(
+            model.checkpoint_payload(step, **extra),
+            output_dir / name,
+        )
 
     for step in range(start_step, train_config.max_steps):
         lr = cosine_lr(
-            step, train_config.max_steps, train_config.warmup_steps,
-            train_config.learning_rate, train_config.min_learning_rate,
+            step,
+            train_config.max_steps,
+            train_config.warmup_steps,
+            train_config.learning_rate,
+            train_config.min_learning_rate,
         )
         for group in optimizer.param_groups:
             group["lr"] = lr
 
         for _ in range(train_config.grad_accum_steps):
             x, y = train_corpus.sample(
-                rng, train_config.micro_batch_size, context
+                rng,
+                train_config.micro_batch_size,
+                context,
             )
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
-            with autocast_context(device, train_config.precision):
+            with autocast_context(
+                device, train_config.precision
+            ):
                 _, loss = executable(x, y)
                 if loss is None or not torch.isfinite(loss):
-                    raise RuntimeError(f"Loss inválido no passo {step}: {loss}")
-                scaled_loss = loss / train_config.grad_accum_steps
+                    raise RuntimeError(
+                        f"Loss inválido no passo {step}: {loss}"
+                    )
+                scaled_loss = (
+                    loss / train_config.grad_accum_steps
+                )
             scaler.scale(scaled_loss).backward()
             tokens_window += x.numel()
             loss_window += float(loss.item())
@@ -338,18 +455,33 @@ def pretrain(args: argparse.Namespace) -> None:
             model.parameters(), train_config.grad_clip
         )
         if not torch.isfinite(torch.as_tensor(grad_norm)):
-            raise RuntimeError(f"Gradiente inválido no passo {step}: {grad_norm}")
+            raise RuntimeError(
+                f"Gradiente inválido no passo {step}: {grad_norm}"
+            )
         scaler.step(optimizer)
         scaler.update()
         optimizer.zero_grad(set_to_none=True)
 
         if step % 20 == 0:
             now = time.perf_counter()
-            tok_s = tokens_window / max(now - last_log, 1e-6)
-            avg_loss = loss_window / max(micro_window, 1)
-            vram = torch.cuda.max_memory_allocated() / 1e9 if device.type == "cuda" else 0.0
-            print(f"[{step:>7}] loss {avg_loss:.4f} | {tok_s:,.0f} tok/s | VRAM {vram:.2f}G")
-            with log_path.open("a", encoding="utf-8") as handle:
+            tok_s = tokens_window / max(
+                now - last_log, 1e-6
+            )
+            avg_loss = (
+                loss_window / max(micro_window, 1)
+            )
+            vram = (
+                torch.cuda.max_memory_allocated() / 1e9
+                if device.type == "cuda"
+                else 0.0
+            )
+            print(
+                f"[{step:>7}] loss {avg_loss:.4f} | "
+                f"{tok_s:,.0f} tok/s | VRAM {vram:.2f}G"
+            )
+            with log_path.open(
+                "a", encoding="utf-8"
+            ) as handle:
                 handle.write(json.dumps({
                     "step": step,
                     "loss": avg_loss,
@@ -364,36 +496,82 @@ def pretrain(args: argparse.Namespace) -> None:
             micro_window = 0
             last_log = now
 
-        if step > 0 and step % train_config.eval_interval == 0:
+        if (
+            step > 0
+            and step % train_config.eval_interval == 0
+        ):
             val_loss = evaluate(
-                model, validation_corpus, eval_rng, device,
-                train_config, context, train_config.eval_batches,
+                model,
+                validation_corpus,
+                eval_rng,
+                device,
+                train_config,
+                context,
+                train_config.eval_batches,
             )
-            print(f"val_loss={val_loss:.4f} | ppl={math.exp(min(val_loss, 20)):.2f}")
+            print(
+                f"val_loss={val_loss:.4f} | "
+                f"ppl={math.exp(min(val_loss, 20)):.2f}"
+            )
             if val_loss < best_val:
                 best_val = val_loss
-                save("pretrain_best.pt", step, include_optimizer=False)
+                save(
+                    "pretrain_best.pt",
+                    step,
+                    include_optimizer=False,
+                )
 
-        if step > 0 and step % train_config.save_interval == 0:
-            save("pretrain_latest.pt", step, include_optimizer=True)
+        if (
+            step > 0
+            and step % train_config.save_interval == 0
+        ):
+            save(
+                "pretrain_latest.pt",
+                step,
+                include_optimizer=True,
+            )
 
-    save("pretrain_final.pt", train_config.max_steps - 1, include_optimizer=True)
+    save(
+        "pretrain_final.pt",
+        train_config.max_steps - 1,
+        include_optimizer=True,
+    )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pré-treino causal Keilinks V4")
+    parser = argparse.ArgumentParser(
+        description="Pré-treino causal Keilinks V4"
+    )
     parser.add_argument("--model", default="core_380m")
     parser.add_argument("--profile", default="rtx5050_380m")
-    parser.add_argument("--input", default="dados/v4/pretrain/pretrain_pt.txt")
-    parser.add_argument("--vocab", default="dados/vocab_v4.json")
-    parser.add_argument("--binary-dir", default="dados/v4/pretrain_binary")
-    parser.add_argument("--output", default="checkpoints/v4-pretrain")
-    parser.add_argument("--validation-ratio", type=float, default=0.005)
+    parser.add_argument(
+        "--input",
+        default="dados/v4/pretrain/pretrain_pt.txt",
+    )
+    parser.add_argument(
+        "--vocab", default="dados/vocab_v4.json"
+    )
+    parser.add_argument(
+        "--binary-dir",
+        default="dados/v4/pretrain_binary",
+    )
+    parser.add_argument(
+        "--output", default="checkpoints/v4-pretrain"
+    )
+    parser.add_argument(
+        "--validation-ratio", type=float, default=0.005
+    )
     parser.add_argument("--steps", type=int)
     parser.add_argument("--resume")
-    parser.add_argument("--rebuild-binary", action="store_true")
-    parser.add_argument("--prepare-only", action="store_true")
-    parser.add_argument("--no-compile", action="store_true")
+    parser.add_argument(
+        "--rebuild-binary", action="store_true"
+    )
+    parser.add_argument(
+        "--prepare-only", action="store_true"
+    )
+    parser.add_argument(
+        "--no-compile", action="store_true"
+    )
     return parser.parse_args()
 
 
@@ -402,5 +580,6 @@ if __name__ == "__main__":
         pretrain(parse_args())
     except torch.OutOfMemoryError as exc:
         raise SystemExit(
-            "CUDA sem memória: feche o Ollama, reduza contexto/perfil ou use checkpoint full."
+            "CUDA sem memória: feche o Ollama, reduza "
+            "contexto/perfil ou use checkpoint full."
         ) from exc
