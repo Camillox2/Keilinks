@@ -33,9 +33,12 @@ class V4Runtime:
         if not self.vocab_path.exists():
             raise FileNotFoundError(self.vocab_path)
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+        # Nunca mapeie um checkpoint completo diretamente para uma GPU de 8 GB:
+        # ele pode conter estados do otimizador além dos pesos do modelo.
         checkpoint = torch.load(
             self.checkpoint_path,
-            map_location=self.device,
+            map_location="cpu",
             weights_only=False,
         )
         if "model" not in checkpoint or "config" not in checkpoint:
@@ -48,8 +51,10 @@ class V4Runtime:
                 f"Vocabulário possui {self.tokenizer.tam_vocab} tokens, "
                 f"checkpoint espera {config.vocab_size}"
             )
-        self.model = KeilinksV4(config).to(self.device)
+        self.model = KeilinksV4(config)
         self.model.load_state_dict(checkpoint["model"], strict=True)
+        del checkpoint
+        self.model.to(self.device)
         self.model.eval()
         self.config = config
         self.eos_id = self.tokenizer.vocab["<fim>"]
