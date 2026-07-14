@@ -10,7 +10,6 @@ import json
 import math
 import os
 import random
-import shutil
 import time
 from contextlib import nullcontext
 from dataclasses import asdict
@@ -39,7 +38,9 @@ def cosine_lr(step: int, total: int, warmup: int,
     if step < warmup:
         return max_lr * (step + 1) / max(warmup, 1)
     progress = min(1.0, (step - warmup) / max(total - warmup, 1))
-    return min_lr + 0.5 * (max_lr - min_lr) * (1.0 + math.cos(math.pi * progress))
+    return min_lr + 0.5 * (max_lr - min_lr) * (
+        1.0 + math.cos(math.pi * progress)
+    )
 
 
 def make_loader(dataset: PackedBinaryDataset, config: TrainConfig,
@@ -55,7 +56,9 @@ def make_loader(dataset: PackedBinaryDataset, config: TrainConfig,
         kwargs["sampler"] = RandomSampler(
             dataset,
             replacement=True,
-            num_samples=max(len(dataset), config.max_steps * config.grad_accum_steps),
+            num_samples=max(
+                len(dataset), config.max_steps * config.grad_accum_steps
+            ),
         )
     if config.num_workers > 0:
         kwargs["prefetch_factor"] = config.prefetch_factor
@@ -74,18 +77,25 @@ def build_optimizer(model: torch.nn.Module, config: TrainConfig,
         try:
             import bitsandbytes as bnb
             return bnb.optim.AdamW8bit(
-                model.parameters(), lr=config.learning_rate,
-                betas=(0.9, 0.95), weight_decay=config.weight_decay,
+                model.parameters(),
+                lr=config.learning_rate,
+                betas=(0.9, 0.95),
+                weight_decay=config.weight_decay,
             )
         except Exception as exc:
-            print(f"[aviso] AdamW 8-bit indisponível ({exc}); usando AdamW.")
+            print(
+                f"[aviso] AdamW 8-bit indisponível ({exc}); usando AdamW comum. "
+                "Em uma GPU de 8 GB isso pode causar falta de memória."
+            )
     options = {
         "lr": config.learning_rate,
         "betas": (0.9, 0.95),
         "weight_decay": config.weight_decay,
     }
     try:
-        return torch.optim.AdamW(model.parameters(), fused=device.type == "cuda", **options)
+        return torch.optim.AdamW(
+            model.parameters(), fused=device.type == "cuda", **options
+        )
     except TypeError:
         return torch.optim.AdamW(model.parameters(), **options)
 
@@ -93,7 +103,11 @@ def build_optimizer(model: torch.nn.Module, config: TrainConfig,
 def autocast_context(device: torch.device, precision: str):
     if device.type != "cuda":
         return nullcontext()
-    dtype = torch.bfloat16 if precision == "bf16" and torch.cuda.is_bf16_supported() else torch.float16
+    dtype = (
+        torch.bfloat16
+        if precision == "bf16" and torch.cuda.is_bf16_supported()
+        else torch.float16
+    )
     return torch.autocast("cuda", dtype=dtype)
 
 
@@ -104,9 +118,15 @@ def atomic_save(payload: dict, target: Path) -> None:
     os.replace(temporary, target)
 
 
-def load_v4_checkpoint(path: Path, device: torch.device) -> dict:
-    checkpoint = torch.load(path, map_location=device, weights_only=False)
-    if not isinstance(checkpoint, dict) or "model" not in checkpoint or "config" not in checkpoint:
+def load_v4_checkpoint(path: Path, device: torch.device | None = None) -> dict:
+    # Carregar primeiro na CPU evita copiar pesos e estados do otimizador juntos
+    # para uma GPU de 8 GB. O modelo é transferido depois de forma controlada.
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    if (
+        not isinstance(checkpoint, dict)
+        or "model" not in checkpoint
+        or "config" not in checkpoint
+    ):
         raise ValueError(f"Checkpoint V4 inválido: {path}")
     return checkpoint
 
@@ -119,11 +139,18 @@ def checkpoint_model_config(checkpoint: dict) -> ModelConfig:
 
 def validate_architecture(requested: ModelConfig, loaded: ModelConfig,
                           source: Path) -> None:
-    fields = ("dim", "n_layers", "n_heads", "n_kv_heads", "ff_dim", "context_length")
-    differences = [field for field in fields if getattr(requested, field) != getattr(loaded, field)]
+    fields = (
+        "vocab_size", "dim", "n_layers", "n_heads", "n_kv_heads",
+        "ff_dim", "context_length",
+    )
+    differences = [
+        field for field in fields
+        if getattr(requested, field) != getattr(loaded, field)
+    ]
     if differences:
         details = ", ".join(
-            f"{field}={getattr(loaded, field)} (esperado {getattr(requested, field)})"
+            f"{field}={getattr(loaded, field)} "
+            f"(esperado {getattr(requested, field)})"
             for field in differences
         )
         raise ValueError(f"Arquitetura incompatível em {source}: {details}")
@@ -155,19 +182,38 @@ def evaluate(model: KeilinksV4, loader: DataLoader, device: torch.device,
 
 def save_checkpoint(model: KeilinksV4, optimizer, step: int, best_val: float,
                     model_name: str, train_config: TrainConfig,
-                    output_dir: Path, filename: str) -> None:
+                    output_dir: Path, filename: str,
+                    include_optimizer: bool = True) -> None:
+    extra = {
+        "best_validation_loss": best_val,
+        "model_profile": model_name,
+        "train_config": asdict(train_config),
+        "phase": "sft",
+        "torch_version": torch.__version__,
+    }
+    if include_optimizer:
+        extra["optimizer"] = optimizer.state_dict()
     atomic_save(
-        model.checkpoint_payload(
-            step,
-            optimizer=optimizer.state_dict(),
-            best_validation_loss=best_val,
-            model_profile=model_name,
-            train_config=asdict(train_config),
-            phase="sft",
-            torch_version=torch.__version__,
-        ),
+        model.checkpoint_payload(step, **extra),
         output_dir / filename,
     )
+
+
+def export_inference_checkpoint(source: Path, target: Path) -> None:
+    checkpoint = load_v4_checkpoint(source)
+    payload = {
+        "version": checkpoint.get("version", 4),
+        "step": checkpoint.get("step", 0),
+        "model": checkpoint["model"],
+        "config": checkpoint["config"],
+        "phase": "sft",
+        "model_profile": checkpoint.get("model_profile"),
+        "train_config": checkpoint.get("train_config"),
+        "best_validation_loss": checkpoint.get("best_validation_loss"),
+        "source_checkpoint": source.name,
+        "inference_only": True,
+    }
+    atomic_save(payload, target)
 
 
 def resolve_bootstrap(args: argparse.Namespace, requested: ModelConfig,
@@ -188,6 +234,8 @@ def resolve_bootstrap(args: argparse.Namespace, requested: ModelConfig,
         checkpoint = load_v4_checkpoint(init_path, device)
         loaded = checkpoint_model_config(checkpoint)
         validate_architecture(requested, loaded, init_path)
+        if checkpoint.get("phase") not in (None, "pretrain"):
+            raise ValueError(f"{init_path} não pertence à fase de pré-treino")
         return loaded, checkpoint, init_path, False
 
     if args.allow_random_init:
@@ -204,11 +252,17 @@ def train(args: argparse.Namespace) -> None:
     requested_config = get_model_config(args.model)
     train_config = get_train_config(args.profile)
     if train_config.phase != "sft":
-        raise ValueError(f"Perfil {args.profile} é de {train_config.phase}, não de SFT")
+        raise ValueError(
+            f"Perfil {args.profile} é de {train_config.phase}, não de SFT"
+        )
     if args.steps is not None:
-        train_config = TrainConfig(**{**asdict(train_config), "max_steps": args.steps})
+        train_config = TrainConfig(**{
+            **asdict(train_config), "max_steps": args.steps,
+        })
     if args.workers is not None:
-        train_config = TrainConfig(**{**asdict(train_config), "num_workers": args.workers})
+        train_config = TrainConfig(**{
+            **asdict(train_config), "num_workers": args.workers,
+        })
 
     seed_everything(train_config.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -227,18 +281,25 @@ def train(args: argparse.Namespace) -> None:
     validation_data = PackedBinaryDataset(args.data, "validation")
     if train_data.context_length != model_config.context_length:
         raise ValueError(
-            f"Dataset usa contexto {train_data.context_length}; modelo usa {model_config.context_length}"
+            f"Dataset usa contexto {train_data.context_length}; "
+            f"modelo usa {model_config.context_length}"
         )
 
     train_loader = make_loader(train_data, train_config, shuffle=True)
     validation_loader = make_loader(validation_data, train_config, shuffle=False)
     batches = infinite_batches(train_loader)
 
-    model = KeilinksV4(model_config).to(device)
-    model.set_gradient_checkpointing(train_config.checkpoint_mode, train_config.checkpoint_every)
+    model = KeilinksV4(model_config)
     if bootstrap is not None:
         model.load_state_dict(bootstrap["model"], strict=True)
-        print(("Retomando SFT" if is_resume else "Carregando pré-treino") + f": {bootstrap_path}")
+        print(
+            ("Retomando SFT" if is_resume else "Carregando pré-treino")
+            + f": {bootstrap_path}"
+        )
+    model.to(device)
+    model.set_gradient_checkpointing(
+        train_config.checkpoint_mode, train_config.checkpoint_every
+    )
 
     optimizer = build_optimizer(model, train_config, device)
     start_step = 0
@@ -248,11 +309,14 @@ def train(args: argparse.Namespace) -> None:
             optimizer.load_state_dict(bootstrap["optimizer"])
         start_step = int(bootstrap.get("step", 0)) + 1
         best_val = float(bootstrap.get("best_validation_loss", math.inf))
+    del bootstrap
 
     executable = model
     if not args.no_compile and hasattr(torch, "compile") and device.type == "cuda":
         try:
-            executable = torch.compile(model, mode=train_config.compile_mode, fullgraph=False)
+            executable = torch.compile(
+                model, mode=train_config.compile_mode, fullgraph=False
+            )
             print(f"torch.compile ativo: {train_config.compile_mode}")
         except Exception as exc:
             print(f"[aviso] torch.compile falhou: {exc}")
@@ -289,7 +353,9 @@ def train(args: argparse.Namespace) -> None:
             labels = labels.to(device, non_blocking=True)
             target_tokens = int((labels != -100).sum().item())
             if target_tokens == 0:
-                raise RuntimeError("Batch sem tokens do assistant; reconstrua o dataset")
+                raise RuntimeError(
+                    "Batch sem tokens do assistant; reconstrua o dataset"
+                )
             with autocast_context(device, train_config.precision):
                 _, loss = executable(input_ids, labels)
                 if loss is None or not torch.isfinite(loss):
@@ -301,7 +367,9 @@ def train(args: argparse.Namespace) -> None:
             micro_window += 1
 
         scaler.unscale_(optimizer)
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), train_config.grad_clip)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(), train_config.grad_clip
+        )
         if not torch.isfinite(torch.as_tensor(grad_norm)):
             raise RuntimeError(f"Gradiente inválido no passo {step}: {grad_norm}")
         scaler.step(optimizer)
@@ -312,8 +380,14 @@ def train(args: argparse.Namespace) -> None:
             now = time.perf_counter()
             tok_s = tokens_window / max(now - last_log, 1e-6)
             avg_loss = loss_window / max(micro_window, 1)
-            vram = torch.cuda.max_memory_allocated() / 1e9 if device.type == "cuda" else 0.0
-            print(f"[{step:>7}] loss {avg_loss:.4f} | {tok_s:,.0f} target tok/s | VRAM {vram:.2f}G")
+            vram = (
+                torch.cuda.max_memory_allocated() / 1e9
+                if device.type == "cuda" else 0.0
+            )
+            print(
+                f"[{step:>7}] loss {avg_loss:.4f} | "
+                f"{tok_s:,.0f} target tok/s | VRAM {vram:.2f}G"
+            )
             with log_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps({
                     "step": step,
@@ -334,30 +408,42 @@ def train(args: argparse.Namespace) -> None:
                 model, validation_loader, device,
                 train_config.precision, train_config.eval_batches,
             )
-            print(f"val_loss={val_loss:.4f} | ppl={math.exp(min(val_loss, 20)):.2f}")
+            print(
+                f"val_loss={val_loss:.4f} | "
+                f"ppl={math.exp(min(val_loss, 20)):.2f}"
+            )
             if val_loss < best_val:
                 best_val = val_loss
                 save_checkpoint(
                     model, optimizer, step, best_val,
                     args.model, train_config, output_dir, "best.pt",
+                    include_optimizer=False,
                 )
 
         if step > 0 and step % train_config.save_interval == 0:
             save_checkpoint(
                 model, optimizer, step, best_val,
                 args.model, train_config, output_dir, "latest.pt",
+                include_optimizer=True,
             )
 
     save_checkpoint(
         model, optimizer, train_config.max_steps - 1, best_val,
         args.model, train_config, output_dir, "final.pt",
+        include_optimizer=True,
     )
-    selected = output_dir / ("best.pt" if (output_dir / "best.pt").exists() else "final.pt")
-    shutil.copy2(selected, output_dir / "keilinks_v4.pt")
+    selected = (
+        output_dir / "best.pt"
+        if (output_dir / "best.pt").exists()
+        else output_dir / "final.pt"
+    )
+    export_inference_checkpoint(selected, output_dir / "keilinks_v4.pt")
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="SFT assistant-only da Keilinks V4")
+    parser = argparse.ArgumentParser(
+        description="SFT assistant-only da Keilinks V4"
+    )
     parser.add_argument("--model", default="core_380m")
     parser.add_argument("--profile", default="rtx5050_sft_380m")
     parser.add_argument("--data", default="dados/v4/packed")
