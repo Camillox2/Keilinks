@@ -1,0 +1,9 @@
+# Instale o PyTorch CUDA separadamente seguindo pytorch.org.
+numpy>=1.26
+requests>=2.32
+datasets>=3.0
+huggingface_hub>=0.27
+ddgs>=9.0
+beautifulsoup4>=4.12
+trafilatura>=2.0
+bitsandbytes>=0.45; platform_system == "Linux"
