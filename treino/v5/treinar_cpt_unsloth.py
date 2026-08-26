@@ -33,12 +33,14 @@ def _sha256_file(path: Path) -> str:
 
 def _tokenize_cpt_batch(
     batch: dict[str, list[str]], tokenizer: Any, max_length: int
-) -> dict[str, list[list[int]]]:
+) -> dict[str, Any]:
     eos_token = tokenizer.eos_token
     if not eos_token:
         raise ValueError("tokenizer do modelo Base não possui eos_token")
     texts = [text.rstrip() + eos_token for text in batch["text"]]
-    return tokenizer(texts, truncation=True, max_length=max_length, add_special_tokens=False)
+    tokenized = tokenizer(texts, truncation=True, max_length=max_length, add_special_tokens=False)
+    tokenized["input_length"] = [len(input_ids) for input_ids in tokenized["input_ids"]]
+    return tokenized
 
 
 def _training_args(training_args_cls: Any, args: argparse.Namespace, bf16: bool) -> Any:
@@ -146,6 +148,9 @@ def train(args: argparse.Namespace) -> Path:
         remove_columns=dataset["train"].column_names,
         desc="Tokenizando corpus CPT",
     )
+    train_tokens = sum(dataset["train"]["input_length"])
+    validation_tokens = sum(dataset["validation"]["input_length"])
+    dataset = dataset.remove_columns("input_length")
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     training_args = _training_args(TrainingArguments, args, torch.cuda.is_bf16_supported())
     trainer_kwargs = {
@@ -177,6 +182,13 @@ def train(args: argparse.Namespace) -> Path:
         "max_steps": args.max_steps,
         "max_seq_length": args.max_seq_length,
         "gradient_accumulation": args.gradient_accumulation,
+        "tokenized_corpus": {
+            "train_tokens": train_tokens,
+            "validation_tokens": validation_tokens,
+            "target_optimizer_tokens": (
+                args.max_steps * args.gradient_accumulation * args.max_seq_length
+            ),
+        },
         "lora": {
             "rank": args.lora_rank,
             "alpha": args.lora_alpha,

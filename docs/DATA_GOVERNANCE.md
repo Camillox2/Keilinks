@@ -75,7 +75,7 @@ Ordem das fontes, após aceite explícito:
 
 ```powershell
 # 1. Coletar uma amostra limitada; o arquivo e o manifesto ficam ignorados pelo Git.
-python -m treino.v5.coletar_datasets --source carolina_pt --accept-terms carolina_cc_by --max-documents 4000 --max-mib 96 --output keilinks_data/raw/carolina_pilot.jsonl
+python -m treino.v5.coletar_datasets --source carolina_pt --accept-terms carolina_cc_by --max-documents 2000 --max-mib 8 --output keilinks_data/raw/carolina_pilot.jsonl
 
 # 2. Aplicar gates, gerar split determinístico e inspecionar o manifesto.
 python -m treino.v5.preparar_cpt prepare --input keilinks_data/raw/carolina_pilot.jsonl --output-dir keilinks_data/cpt/carolina_pilot --validation-percent 5
@@ -88,9 +88,10 @@ python -m treino.v5.treinar_cpt_unsloth --data-manifest keilinks_data/cpt/caroli
 ```
 
 Antes de passar à próxima etapa, guardar o `training_manifest.json`, medir
-VRAM/tokens por segundo, comparar perda de validação e executar uma suíte de
-prompts PT-BR congelada. O adaptador só avança para SFT se não houver regressão
-nos casos de segurança, honestidade e instrução.
+VRAM/tokens por segundo, conferir os totais tokenizados registrados no
+manifesto, comparar perda de validação e executar uma suíte de prompts PT-BR
+congelada. O adaptador só avança para SFT se não houver regressão nos casos de
+segurança, honestidade e instrução.
 
 ## Tecnologias que entram agora e as que ficam em experimento
 

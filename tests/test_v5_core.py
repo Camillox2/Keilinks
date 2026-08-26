@@ -28,9 +28,20 @@ from keilinks_v5.settings import KeilinksSettings, load_project_env
 from keilinks_v5.vision import VisionService, VisionUnavailable
 from treino.v5.coletar_datasets import SOURCES, collect
 from treino.v5.preparar_preferencias import prepare_preferences
+from treino.v5.treinar_cpt_unsloth import _tokenize_cpt_batch
 
 
 class TestV5Core(unittest.TestCase):
+    def test_cpt_tokenizer_records_actual_token_counts(self) -> None:
+        class FakeTokenizer:
+            eos_token = "<eos>"
+
+            def __call__(self, texts: list[str], **_: object) -> dict[str, list[list[int]]]:
+                return {"input_ids": [list(range(len(text))) for text in texts]}
+
+        result = _tokenize_cpt_batch({"text": ["abc", "quatro"]}, FakeTokenizer(), 16)
+        self.assertEqual(result["input_length"], [8, 11])
+
     def test_server_cli_supports_safe_runtime_overrides(self) -> None:
         args = parse_server_args(["--host", "127.0.0.1", "--port", "8123", "--log-level", "debug"])
         self.assertEqual(args.host, "127.0.0.1")
