@@ -234,6 +234,20 @@ prompt injection e acesso entre tenants.
 4. Criar suite visual PT-BR antes de alterar o VLM padrão.
 5. Medir p50/p95, tokens por segundo, VRAM máxima e falhas em sessões locais.
 
+### Correções e gate de CPT adicionados após a promoção V4
+
+- O `.env` agora é carregado de forma explícita pelo runtime V5/V6, sem
+  sobrescrever variáveis fornecidas pelo processo; antes, a documentação
+  instruía copiar o arquivo mas o runtime ignorava seus valores.
+- SFT passou a recusar exemplos sem `source` e `license` verificáveis.
+- CPT recebeu uma trilha separada: manifesto de aceite de termos, hash e
+  proveniência por documento, deduplicação exata, exclusão de padrões sensíveis
+  e marcadores reservados, aprovação humana obrigatória e treino QLoRA sobre
+  Qwen3 Base.
+- Dados legados de texto sem proveniência auditável ou com conteúdo pessoal não
+  devem ser usados no treino novo. O plano operacional está em
+  `docs/DATA_GOVERNANCE.md`.
+
 ### Fase 2 — dados e preferência
 
 1. Coletar pequenas amostras de fontes abertas somente após aceitar termos.

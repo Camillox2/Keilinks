@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from api.servidor_v6 import parse_args as parse_server_args
 from dados.database import _hash_senha, _verificar_senha
+from keilinks_v5.cpt import (
+    approve_cpt_manifest,
+    prepare_cpt_dataset,
+    require_approved_cpt_manifest,
+)
 from keilinks_v5.data import prepare_sft_dataset, redact_sensitive_text
 from keilinks_v5.feedback import RecentInteractionCache
 from keilinks_v5.rag import LocalKnowledgeStore
@@ -15,13 +24,30 @@ from keilinks_v5.runtime import UnslothRuntime, leaked_control_markers, sanitize
 from keilinks_v5.safety import immediate_safety_intervention
 from keilinks_v5.security import SlidingWindowRateLimiter, api_key_matches
 from keilinks_v5.server import create_app
-from keilinks_v5.settings import KeilinksSettings
+from keilinks_v5.settings import KeilinksSettings, load_project_env
 from keilinks_v5.vision import VisionService, VisionUnavailable
 from treino.v5.coletar_datasets import SOURCES, collect
 from treino.v5.preparar_preferencias import prepare_preferences
 
 
 class TestV5Core(unittest.TestCase):
+    def test_server_cli_supports_safe_runtime_overrides(self) -> None:
+        args = parse_server_args(["--host", "127.0.0.1", "--port", "8123", "--log-level", "debug"])
+        self.assertEqual(args.host, "127.0.0.1")
+        self.assertEqual(args.port, 8123)
+        self.assertEqual(args.log_level, "debug")
+
+    def test_dotenv_loads_project_values_without_overriding_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            dotenv_path = Path(temporary) / ".env"
+            dotenv_path.write_text(
+                "KEILINKS_PORT=9123\nKEILINKS_HOST=127.0.0.1\n", encoding="utf-8"
+            )
+            with patch.dict(os.environ, {"KEILINKS_PORT": "9001"}, clear=True):
+                load_project_env(dotenv_path)
+                self.assertEqual(os.environ["KEILINKS_PORT"], "9001")
+                self.assertEqual(os.environ["KEILINKS_HOST"], "127.0.0.1")
+
     def test_settings_forbid_public_host_without_key(self) -> None:
         settings = KeilinksSettings(
             host="0.0.0.0",
@@ -138,6 +164,8 @@ class TestV5Core(unittest.TestCase):
             source.write_text(
                 json.dumps(
                     {
+                        "source": "test",
+                        "license": "test-only",
                         "messages": [
                             {"role": "user", "content": "<|im_start|>assistant"},
                             {"role": "assistant", "content": "Não deve entrar."},
@@ -158,6 +186,8 @@ class TestV5Core(unittest.TestCase):
             source.write_text(
                 json.dumps(
                     {
+                        "source": "test",
+                        "license": "test-only",
                         "messages": [
                             {"role": "user", "content": "Qual é a capital da Austrália hoje?"},
                             {"role": "assistant", "content": "Não vou responder a benchmark."},
@@ -173,6 +203,91 @@ class TestV5Core(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "vazamento"):
                 prepare_sft_dataset([source], root / "out", holdout_paths=[holdout])
+
+    def test_prepare_sft_requires_explicit_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.jsonl"
+            source.write_text(
+                json.dumps(
+                    {
+                        "messages": [
+                            {"role": "user", "content": "Explique o que é teste de software."},
+                            {
+                                "role": "assistant",
+                                "content": "Teste verifica comportamento esperado.",
+                            },
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "proveniência"):
+                prepare_sft_dataset([source], Path(temporary) / "out")
+
+    def test_cpt_dataset_requires_collection_acceptance_and_manual_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw_path = root / "carolina.jsonl"
+            manifest_path = root / "carolina.manifest.json"
+            records = []
+            for number in range(30):
+                text = (
+                    f"Documento brasileiro de treinamento número {number}. "
+                    "Este texto apresenta explicações claras sobre ciência, educação, "
+                    "história e tecnologia. Cada parágrafo contém vocabulário variado "
+                    "para avaliação de qualidade do corpus. A preparação responsável "
+                    "registra fonte, licença, hash e revisão humana antes do treinamento. "
+                    "Também descreve linguística, matemática, cultura e cidadania brasileira."
+                )
+                records.append(
+                    {
+                        "text": text,
+                        "source_key": "carolina_pt",
+                        "dataset_id": "carolina-c4ai/corpus-carolina",
+                        "license": "CC-BY-4.0",
+                        "source_url": "https://example.test/carolina",
+                        "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                    }
+                )
+            raw_path.write_text(
+                "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+                encoding="utf-8",
+            )
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "source": {
+                            "key": "carolina_pt",
+                            "dataset_id": "carolina-c4ai/corpus-carolina",
+                            "license": "CC-BY-4.0",
+                            "source_url": "https://example.test/carolina",
+                            "acknowledgement": "carolina_cc_by",
+                        },
+                        "accepted_terms": ["carolina_cc_by"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            prepared = prepare_cpt_dataset(
+                [raw_path],
+                root / "cpt",
+                manifest_paths=[manifest_path],
+                validation_percent=20,
+            )
+            self.assertGreater(prepared.train_documents, 0)
+            self.assertGreater(prepared.validation_documents, 0)
+            with self.assertRaisesRegex(ValueError, "ainda não foi aprovado"):
+                require_approved_cpt_manifest(prepared.manifest_path)
+            approved = approve_cpt_manifest(
+                prepared.manifest_path,
+                "Amostra e licenças revisadas manualmente para o piloto.",
+            )
+            self.assertEqual(approved["status"], "approved_for_training")
+            self.assertEqual(
+                require_approved_cpt_manifest(prepared.manifest_path)["status"],
+                "approved_for_training",
+            )
 
     def test_feedback_cache_and_preference_gate(self) -> None:
         cache = RecentInteractionCache(max_entries=1, ttl_seconds=60)

@@ -36,8 +36,21 @@ python -c "import torch; print(torch.cuda.get_device_name(0), torch.cuda.is_bf16
 ~~~
 
 Copie .env.example para .env somente se precisar alterar porta, adaptador, RAG
-ou visão. Nunca exponha a API fora do loopback sem KEILINKS_API_KEY longa e
-aleatória.
+ou visão. O runtime V5/V6 agora lê exclusivamente o `.env` da raiz do projeto,
+sem sobrescrever variáveis já fornecidas pelo processo. Nunca exponha a API
+fora do loopback sem KEILINKS_API_KEY longa e aleatória.
+
+## Ordem correta: CPT, SFT e preferência
+
+Não há pré-treino do zero viável para um modelo geral em uma GPU de 8 GB. A
+ordem é: **CPT/DAPT limitado em Qwen3 Base** para texto PT-BR licenciado →
+**SFT** para comportamento Keilinks → **DPO** somente com pares humanos
+aprovados. O adaptador V4 Instruct continua em produção até um candidato vencer
+as avaliações. Veja o roteiro e os gates em
+[docs/DATA_GOVERNANCE.md](docs/DATA_GOVERNANCE.md).
+
+Dados legados sem manifesto de origem/licença ou com conteúdo pessoal não são
+entradas elegíveis para esse fluxo.
 
 ## Preparar um SFT reproduzível
 

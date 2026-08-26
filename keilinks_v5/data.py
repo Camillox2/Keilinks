@@ -16,6 +16,7 @@ from typing import Any
 
 ALLOWED_ROLES = {"system", "user", "assistant"}
 FORBIDDEN_TEMPLATE_MARKERS = ("<|im_start|>", "<|im_end|>", "<|endoftext|>")
+UNKNOWN_PROVENANCE_VALUES = {"", "unknown", "unverified", "none", "null", "n/a"}
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 CPF_RE = re.compile(r"\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[-\s]?\d{2}\b")
@@ -65,6 +66,14 @@ def _validated_messages(raw_messages: Any) -> list[dict[str, str]]:
     return messages
 
 
+def _validated_provenance(raw: dict[str, Any], field: str) -> str:
+    """Exige origem e licença explícitas antes de um exemplo entrar no SFT."""
+    value = str(raw.get(field, "")).strip()
+    if value.casefold() in UNKNOWN_PROVENANCE_VALUES:
+        raise ValueError(f"{field} de proveniência ausente ou não verificado")
+    return value
+
+
 def iter_conversations(path: Path) -> Iterator[dict[str, Any]]:
     with path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -72,7 +81,11 @@ def iter_conversations(path: Path) -> Iterator[dict[str, Any]]:
                 continue
             try:
                 raw = json.loads(line)
+                if not isinstance(raw, dict):
+                    raise ValueError("registro deve ser objeto JSON")
                 messages = _validated_messages(raw.get("messages"))
+                source = _validated_provenance(raw, "source")
+                license_name = _validated_provenance(raw, "license")
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise ValueError(f"{path}:{line_number}: {exc}") from exc
             record_id = str(raw.get("id") or f"{path.stem}-{line_number}")
@@ -80,8 +93,8 @@ def iter_conversations(path: Path) -> Iterator[dict[str, Any]]:
             yield {
                 "id": record_id,
                 "group_id": group_id,
-                "source": str(raw.get("source", "unknown")),
-                "license": str(raw.get("license", "unknown")),
+                "source": source,
+                "license": license_name,
                 "messages": messages,
             }
 

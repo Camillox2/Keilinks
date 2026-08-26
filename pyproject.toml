@@ -12,6 +12,7 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pydantic>=2.8",
   "python-multipart>=0.0.12",
+  "python-dotenv>=1.0",
   "pymysql>=1.1",
 ]
 

@@ -149,6 +149,8 @@ def collect(
         "output": str(output_path),
         "documents": written,
         "bytes": bytes_written,
+        "accepted_terms": sorted(accept_terms),
+        "manual_license_review": manual_license_review,
         "collected_at": datetime.now(UTC).isoformat(),
         "next_gate": (
             "curate, deduplicate against eval, and create a training manifest before training"
