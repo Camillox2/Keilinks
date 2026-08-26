@@ -28,7 +28,7 @@ USER_AGENT = "Keilinks/4.0 local research assistant"
 REQUEST_TIMEOUT = float(os.getenv("KEILINKS_WEB_TIMEOUT", "12"))
 MAX_RESULTS = int(os.getenv("KEILINKS_WEB_MAX_RESULTS", "6"))
 CACHE_TTL_SECONDS = int(os.getenv("KEILINKS_WEB_CACHE_TTL", "21600"))
-TRUSTED_SUFFIXES = (".gov.br", ".gov", ".edu", ".edu.br", ".org", "who.int",
+TRUSTED_SUFFIXES = (".gov.br", ".gov", ".edu", ".edu.br", "who.int",
                     "wikipedia.org", "docs.python.org", "pytorch.org", "nvidia.com",
                     "github.com", "huggingface.co")
 CURRENT_TERMS = {"hoje","agora","atual","atualmente","último","ultima","última",
@@ -157,11 +157,16 @@ def _query_terms(query):
     return {t for t in re.findall(r"[a-záàâãéèêíìîóòôõúùûç0-9]+",query.lower()) if len(t)>=3 and t not in stop}
 
 
+def _domain_matches_suffix(domain: str, suffix: str) -> bool:
+    normalized = suffix.lstrip(".").lower()
+    return domain == normalized or domain.endswith(f".{normalized}")
+
+
 def _score_result(query,result):
     terms=_query_terms(query); hay=f"{result.title} {result.snippet} {result.content[:2500]}".lower()
     coverage=sum(t in hay for t in terms)/max(len(terms),1)
     host=(urlparse(result.url).hostname or "").lower()
-    trust=.2 if any(host==s or host.endswith(s) for s in TRUSTED_SUFFIXES) else 0
+    trust=.2 if any(_domain_matches_suffix(host, suffix) for suffix in TRUSTED_SUFFIXES) else 0
     title=sum(t in result.title.lower() for t in terms)/max(len(terms),1)*.25
     result.score=coverage+trust+title+min(len(result.content)/5000,1)*.1
     return result.score
@@ -274,7 +279,9 @@ def _result_domain(result: SearchResult) -> str:
 
 
 def _is_trusted_domain(domain: str) -> bool:
-    return any(domain == suffix or domain.endswith(suffix) for suffix in TRUSTED_SUFFIXES)
+    return any(
+        _domain_matches_suffix(domain, suffix) for suffix in TRUSTED_SUFFIXES
+    )
 
 
 def tem_evidencia_suficiente(

@@ -26,17 +26,18 @@ Use `core_380m_modern`, não `core_380m_v5_experimental`, para o treino longo:
 
 Benchmark local de 26/08/2026, com batch físico 1 e 2.048 tokens:
 
-| Métrica | Resultado |
-| --- | ---: |
-| VRAM de pico | 5,69 GB |
-| Vazão medida | 3.234 tokens/s |
+| Métrica | Baseline eager | `torch.compile` |
+| --- | ---: | ---: |
+| VRAM de pico medida | 5,69 GB | 4,41 GB |
+| Vazão medida | 3.368 tokens/s | 3.963 tokens/s |
 | Perfil efetivo | 16 microbatches por passo |
 | Exposição-alvo inicial | 160.000 × 16 × 2.048 = 5,24B tokens |
 
-O número acima implica aproximadamente 19 dias de computação ideal; logs,
-checkpoints, validação, temperatura e processos concorrentes aumentam esse
-tempo. Trate o primeiro ciclo como um experimento longo e retomável, não como
-um download que termina o modelo.
+O caminho compilado ficou 17,7% mais rápido no teste quente de cinco passos. A
+meta acima implica aproximadamente 15,3 dias de computação ideal nessa vazão;
+logs, checkpoints, validação, temperatura e processos concorrentes aumentam
+esse tempo. Trate o primeiro ciclo como um experimento longo e retomável, não
+como um download que termina o modelo.
 
 ## Dados em coleta
 
