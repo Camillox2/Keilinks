@@ -119,6 +119,31 @@ def _create_schema(connection: sqlite3.Connection) -> None:
             valor TEXT,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- A tabela ``memoria`` acima é o contrato legado/global. A memória
+        -- usada pelo runtime V4 é separada por usuário e nunca deve misturar
+        -- informações entre contas.
+        CREATE TABLE IF NOT EXISTS user_memory_settings (
+            user_id INTEGER PRIMARY KEY,
+            memory_enabled INTEGER NOT NULL DEFAULT 0,
+            history_enabled INTEGER NOT NULL DEFAULT 1,
+            training_consent INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS user_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            category TEXT NOT NULL DEFAULT 'note',
+            content TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_memories_user_updated
+            ON user_memories(user_id, updated_at DESC, id DESC);
         """
     )
     try:
@@ -611,6 +636,318 @@ def usuario_por_token(token: str) -> dict[str, Any] | None:
             "SELECT id, username, nome FROM usuarios WHERE username = ?", (username,)
         ).fetchone()
     return _row_dict(row)
+
+
+def usuario_por_id(user_id: int) -> dict[str, Any] | None:
+    with _connection_scope() as connection:
+        row = connection.execute(
+            "SELECT id, username, nome FROM usuarios WHERE id = ?", (int(user_id),)
+        ).fetchone()
+    return _row_dict(row)
+
+
+_MEMORY_CATEGORIES = {"preference", "profile", "project", "note"}
+_SENSITIVE_MEMORY_PATTERN = re.compile(
+    r"\b(?:senha|password|api[ _-]?key|chave[ _-]?(?:api|privada|secreta)|"
+    r"token|cpf|cart[aã]o|cvv|n[uú]mero[ _-]?de[ _-]?conta)\b",
+    flags=re.IGNORECASE,
+)
+_MEMORY_STOP_WORDS = {
+    "a", "ao", "aos", "as", "com", "como", "da", "das", "de", "do", "dos",
+    "e", "ela", "ele", "em", "eu", "isso", "meu", "minha", "na", "nas", "no",
+    "nos", "o", "os", "para", "por", "que", "se", "um", "uma", "você", "voce",
+}
+
+
+def _coerce_bool(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "sim", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "nao", "não", "off"}:
+            return False
+    raise ValueError(f"{field} deve ser booleano")
+
+
+def _ensure_user_memory_settings(connection: sqlite3.Connection, user_id: int) -> None:
+    connection.execute(
+        "INSERT OR IGNORE INTO user_memory_settings (user_id) VALUES (?)",
+        (int(user_id),),
+    )
+
+
+def _memory_settings_dict(row: sqlite3.Row) -> dict[str, Any]:
+    item = _row_dict(row) or {}
+    return {
+        "memory_enabled": bool(item.get("memory_enabled")),
+        "history_enabled": bool(item.get("history_enabled")),
+        "training_consent": bool(item.get("training_consent")),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def memoria_usuario_config(user_id: int) -> dict[str, Any]:
+    """Retorna as escolhas de privacidade de uma única conta."""
+
+    with _connection_scope() as connection:
+        _ensure_user_memory_settings(connection, user_id)
+        row = connection.execute(
+            "SELECT * FROM user_memory_settings WHERE user_id = ?", (int(user_id),)
+        ).fetchone()
+    if row is None:  # Cobertura defensiva para um banco externo inconsistente.
+        raise LookupError("configuração de memória não encontrada")
+    return _memory_settings_dict(row)
+
+
+def memoria_usuario_config_atualizar(
+    user_id: int,
+    *,
+    memory_enabled: Any | None = None,
+    history_enabled: Any | None = None,
+    training_consent: Any | None = None,
+) -> dict[str, Any]:
+    """Atualiza somente as escolhas explicitamente fornecidas pela pessoa."""
+
+    values: list[Any] = []
+    assignments: list[str] = []
+    for column, value in (
+        ("memory_enabled", memory_enabled),
+        ("history_enabled", history_enabled),
+        ("training_consent", training_consent),
+    ):
+        if value is None:
+            continue
+        assignments.append(f"{column} = ?")
+        values.append(int(_coerce_bool(value, column)))
+
+    with _connection_scope() as connection:
+        _ensure_user_memory_settings(connection, user_id)
+        if assignments:
+            assignments.append("updated_at = CURRENT_TIMESTAMP")
+            connection.execute(
+                "UPDATE user_memory_settings SET "
+                + ", ".join(assignments)
+                + " WHERE user_id = ?",
+                (*values, int(user_id)),
+            )
+        row = connection.execute(
+            "SELECT * FROM user_memory_settings WHERE user_id = ?", (int(user_id),)
+        ).fetchone()
+    if row is None:
+        raise LookupError("configuração de memória não encontrada")
+    return _memory_settings_dict(row)
+
+
+def _normalize_memory_content(content: Any) -> str:
+    value = re.sub(r"\s+", " ", str(content or "")).strip()
+    if len(value) < 3:
+        raise ValueError("memória deve ter ao menos 3 caracteres")
+    if len(value) > 700:
+        raise ValueError("memória pode ter no máximo 700 caracteres")
+    if _SENSITIVE_MEMORY_PATTERN.search(value):
+        raise ValueError(
+            "não salve senhas, chaves, documentos, cartões ou outros segredos como memória"
+        )
+    return value
+
+
+def _normalize_memory_category(category: Any) -> str:
+    value = str(category or "note").strip().lower()
+    if value not in _MEMORY_CATEGORIES:
+        raise ValueError("categoria de memória inválida")
+    return value
+
+
+def memorias_usuario_listar(user_id: int, limite: int = 100) -> list[dict[str, Any]]:
+    maximum = max(1, min(int(limite), 200))
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, category, content, source, created_at, updated_at
+            FROM user_memories
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+            """,
+            (int(user_id), maximum),
+        ).fetchall()
+    return [_row_dict(row) for row in rows if row is not None]
+
+
+def memoria_usuario_criar(
+    user_id: int,
+    content: Any,
+    *,
+    category: Any = "note",
+    source: str = "manual",
+) -> dict[str, Any]:
+    """Registra uma memória curta, explícita e revisável para uma conta."""
+
+    normalized_content = _normalize_memory_content(content)
+    normalized_category = _normalize_memory_category(category)
+    with _connection_scope() as connection:
+        _ensure_user_memory_settings(connection, user_id)
+        total = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM user_memories WHERE user_id = ?", (int(user_id),)
+            ).fetchone()[0]
+        )
+        if total >= 200:
+            raise ValueError("limite de 200 memórias por usuário atingido")
+        cursor = connection.execute(
+            """
+            INSERT INTO user_memories (user_id, category, content, source)
+            VALUES (?, ?, ?, ?)
+            """,
+            (int(user_id), normalized_category, normalized_content, str(source)[:50]),
+        )
+        row = connection.execute(
+            """
+            SELECT id, category, content, source, created_at, updated_at
+            FROM user_memories WHERE id = ? AND user_id = ?
+            """,
+            (cursor.lastrowid, int(user_id)),
+        ).fetchone()
+    return _row_dict(row) or {}
+
+
+def memoria_usuario_atualizar(
+    user_id: int,
+    memory_id: int,
+    *,
+    content: Any | None = None,
+    category: Any | None = None,
+) -> dict[str, Any] | None:
+    assignments: list[str] = []
+    values: list[Any] = []
+    if content is not None:
+        assignments.append("content = ?")
+        values.append(_normalize_memory_content(content))
+    if category is not None:
+        assignments.append("category = ?")
+        values.append(_normalize_memory_category(category))
+    if not assignments:
+        return next(
+            (
+                item
+                for item in memorias_usuario_listar(user_id, 200)
+                if item["id"] == int(memory_id)
+            ),
+            None,
+        )
+
+    with _connection_scope() as connection:
+        assignments.append("updated_at = CURRENT_TIMESTAMP")
+        connection.execute(
+            "UPDATE user_memories SET "
+            + ", ".join(assignments)
+            + " WHERE id = ? AND user_id = ?",
+            (*values, int(memory_id), int(user_id)),
+        )
+        row = connection.execute(
+            """
+            SELECT id, category, content, source, created_at, updated_at
+            FROM user_memories WHERE id = ? AND user_id = ?
+            """,
+            (int(memory_id), int(user_id)),
+        ).fetchone()
+    return _row_dict(row)
+
+
+def memoria_usuario_excluir(user_id: int, memory_id: int) -> bool:
+    with _connection_scope() as connection:
+        cursor = connection.execute(
+            "DELETE FROM user_memories WHERE id = ? AND user_id = ?",
+            (int(memory_id), int(user_id)),
+        )
+    return cursor.rowcount > 0
+
+
+def usuario_atualizar_nome(user_id: int, nome: Any) -> dict[str, Any] | None:
+    normalized = re.sub(r"\s+", " ", str(nome or "")).strip()
+    if not normalized:
+        raise ValueError("nome não pode ficar vazio")
+    if len(normalized) > 100:
+        raise ValueError("nome pode ter no máximo 100 caracteres")
+    with _connection_scope() as connection:
+        connection.execute(
+            "UPDATE usuarios SET nome = ? WHERE id = ?", (normalized, int(user_id))
+        )
+        row = connection.execute(
+            "SELECT id, username, nome FROM usuarios WHERE id = ?", (int(user_id),)
+        ).fetchone()
+    return _row_dict(row)
+
+
+def _memory_terms(text: str) -> set[str]:
+    return {
+        word
+        for word in re.findall(r"[a-zA-ZÀ-ÿ0-9]{3,}", text.lower())
+        if word not in _MEMORY_STOP_WORDS
+    }
+
+
+def memoria_usuario_contexto(user_id: int, question: str = "", limite: int = 5) -> str:
+    """Monta um contexto pequeno e relevante, sem vazar memórias de outra conta."""
+
+    settings = memoria_usuario_config(user_id)
+    if not settings["memory_enabled"]:
+        return ""
+    profile = usuario_por_id(user_id)
+    memories = memorias_usuario_listar(user_id, 100)
+    question_terms = _memory_terms(question)
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+    for position, item in enumerate(memories):
+        score = len(question_terms & _memory_terms(str(item.get("content", ""))))
+        ranked.append((score, -position, item))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+
+    selected = [item for score, _, item in ranked if score > 0][:limite]
+    if len(selected) < limite:
+        # Preferências são deliberadamente aplicáveis a quase toda resposta
+        # (por exemplo, tom conciso ou idioma). Só elas podem complementar
+        # uma busca sem termos coincidentes; notas e dados de projeto ficam de
+        # fora até serem de fato relevantes para a pergunta atual.
+        selected_ids = {int(item["id"]) for item in selected}
+        for _, _, item in ranked:
+            if item.get("category") != "preference" or int(item["id"]) in selected_ids:
+                continue
+            selected.append(item)
+            selected_ids.add(int(item["id"]))
+            if len(selected) >= min(limite, 2):
+                break
+
+    parts: list[str] = []
+    if profile and profile.get("nome"):
+        parts.append(f"nome confirmado: {profile['nome']}")
+    labels = {
+        "preference": "preferência",
+        "profile": "perfil",
+        "project": "projeto",
+        "note": "nota",
+    }
+    for item in selected:
+        label = labels.get(str(item.get("category")), "nota")
+        parts.append(f"{label}: {item['content']}")
+    return " | ".join(parts)[:1800]
+
+
+def conversa_historico_usuario(user_id: int, limite: int = 50) -> list[dict[str, Any]]:
+    maximum = max(1, min(int(limite), 500))
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT pergunta, resposta, fonte, created_at, chat_id
+            FROM conversas WHERE usuario_id = ?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (int(user_id), maximum),
+        ).fetchall()
+    return [_row_dict(row) for row in reversed(rows) if row is not None]
 
 
 def chat_criar(usuario_id: int, titulo: str = "Nova conversa") -> dict[str, Any]:

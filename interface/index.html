@@ -246,6 +246,25 @@
       background: rgba(124,58,237,0.08);
     }
 
+    .btn-memoria {
+      margin: 0 16px 12px;
+      padding: 9px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.025);
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      text-align: left;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+    }
+
+    .btn-memoria:hover {
+      border-color: var(--purple);
+      color: var(--purple2);
+      background: rgba(124,58,237,0.08);
+    }
+
     .chat-list {
       flex: 1;
       overflow-y: auto;
@@ -768,6 +787,146 @@
     .boas-vindas h2 { font-size: 20px; color: var(--text); margin-bottom: 8px; }
     .boas-vindas p  { font-size: 14px; }
 
+    /* ─── Memória pessoal ─── */
+    .memory-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      padding: 20px;
+      background: rgba(5, 5, 12, 0.72);
+      align-items: center;
+      justify-content: center;
+    }
+
+    .memory-modal.open { display: flex; }
+
+    .memory-dialog {
+      width: min(640px, 100%);
+      max-height: min(780px, calc(100dvh - 40px));
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+    }
+
+    .memory-dialog-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 20px 20px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .memory-dialog-header h2 { font-size: 17px; margin-bottom: 5px; }
+    .memory-dialog-header p { color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .memory-close {
+      width: 30px;
+      height: 30px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 21px;
+      cursor: pointer;
+    }
+    .memory-close:hover { color: #f87171; background: rgba(248,113,113,0.08); }
+
+    .memory-dialog-body { padding: 16px 20px 20px; }
+
+    .memory-section {
+      padding: 16px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+    .memory-section:first-child { padding-top: 0; }
+    .memory-section:last-child { border-bottom: 0; padding-bottom: 0; }
+    .memory-section h3 { font-size: 13px; margin-bottom: 7px; }
+    .memory-help { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
+
+    .memory-form-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .memory-form-row input,
+    .memory-form-row select,
+    .memory-input {
+      min-width: 0;
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      padding: 9px 10px;
+      outline: none;
+    }
+    .memory-form-row input:focus,
+    .memory-form-row select:focus,
+    .memory-input:focus { border-color: var(--purple); }
+    .memory-form-row select { width: auto; min-width: 118px; }
+
+    .memory-action {
+      flex-shrink: 0;
+      border: 0;
+      border-radius: 9px;
+      padding: 9px 11px;
+      background: linear-gradient(135deg, var(--purple), var(--purple2));
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .memory-action:hover { opacity: 0.87; }
+    .memory-action.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+    .memory-setting {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 10px 0;
+      cursor: pointer;
+    }
+    .memory-setting input { margin-top: 3px; accent-color: var(--purple2); }
+    .memory-setting strong { display: block; font-size: 13px; font-weight: 500; }
+    .memory-setting span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+
+    .memory-feedback { min-height: 18px; color: var(--muted); font-size: 12px; margin-top: 9px; }
+    .memory-feedback.error { color: #f87171; }
+    .memory-feedback.success { color: #4ade80; }
+
+    .memory-list { display: flex; flex-direction: column; gap: 8px; }
+    .memory-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+    .memory-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: start;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.02);
+    }
+    .memory-item-category { color: var(--purple2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .memory-item-content { margin-top: 4px; font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
+    .memory-item-actions { display: flex; gap: 4px; }
+    .memory-item-actions button {
+      border: 0;
+      border-radius: 6px;
+      padding: 4px 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .memory-item-actions button:hover { background: rgba(255,255,255,0.07); color: var(--text); }
+    .memory-item-actions .memory-delete:hover { color: #f87171; }
+
     /* Responsive */
     @media (max-width: 768px) {
       .sidebar { width: 240px; }
@@ -839,6 +998,13 @@
 
       .crawler-panel { margin: 0 12px 8px; }
 
+      .memory-modal { padding: 10px; }
+      .memory-dialog { max-height: calc(100dvh - 20px); }
+      .memory-dialog-header, .memory-dialog-body { padding-left: 15px; padding-right: 15px; }
+      .memory-form-row { flex-wrap: wrap; }
+      .memory-form-row select { flex: 1; }
+      .memory-form-row .memory-input { flex-basis: 100%; }
+
       /* Mensagens usam mais largura */
       .msg { max-width: 92%; }
     }
@@ -896,6 +1062,7 @@
     </div>
 
     <button class="btn-nova-conversa" onclick="novaConversa()">+ Nova conversa</button>
+    <button class="btn-memoria" onclick="abrirMemoriaPessoal()">&#129504; Memória e privacidade</button>
 
     <div class="chat-list" id="chat-list">
       <!-- Conversas aparecem aqui -->
@@ -954,6 +1121,67 @@
   </div>
 </div>
 
+<!-- ─── Memória pessoal ─── -->
+<div id="memory-modal" class="memory-modal" aria-hidden="true" onclick="fecharMemoriaAoFundo(event)">
+  <section class="memory-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-title">
+    <div class="memory-dialog-header">
+      <div>
+        <h2 id="memory-title">Memória pessoal</h2>
+        <p>A Keilinks usa apenas informações que você salva ou confirma. Você pode editar ou apagar tudo aqui.</p>
+      </div>
+      <button class="memory-close" onclick="fecharMemoriaPessoal()" aria-label="Fechar memória">&times;</button>
+    </div>
+    <div class="memory-dialog-body">
+      <section class="memory-section">
+        <h3>Seu perfil</h3>
+        <p class="memory-help">Este nome pode ser usado para tornar a conversa mais natural.</p>
+        <div class="memory-form-row">
+          <input id="memory-profile-name" type="text" maxlength="100" autocomplete="name" placeholder="Como a Keilinks deve chamar você?" />
+          <button class="memory-action" onclick="salvarPerfilMemoria()">Salvar</button>
+        </div>
+      </section>
+
+      <section class="memory-section">
+        <h3>Controles</h3>
+        <label class="memory-setting">
+          <input id="memory-enabled" type="checkbox" />
+          <span><strong>Usar memória pessoal nas respostas</strong>Somente fatos desta conta são enviados como contexto quando forem relevantes.</span>
+        </label>
+        <label class="memory-setting">
+          <input id="history-enabled" type="checkbox" />
+          <span><strong>Salvar histórico de conversas</strong>Permite abrir conversas antigas desta conta. Desativar impede novos registros.</span>
+        </label>
+        <label class="memory-setting">
+          <input id="training-consent" type="checkbox" />
+          <span><strong>Ajudar a melhorar a Keilinks</strong>Exige revisão, remoção de dados sensíveis e um treino futuro separado; nunca muda o modelo imediatamente.</span>
+        </label>
+        <button class="memory-action secondary" onclick="salvarConfiguracoesMemoria()">Salvar controles</button>
+      </section>
+
+      <section class="memory-section">
+        <h3>Adicionar memória</h3>
+        <p class="memory-help">Exemplo: “Prefiro respostas objetivas” ou “Estou desenvolvendo a Keilinks”. Não guarde senhas, chaves ou documentos.</p>
+        <div class="memory-form-row">
+          <select id="memory-category" aria-label="Categoria da memória">
+            <option value="preference">Preferência</option>
+            <option value="profile">Perfil</option>
+            <option value="project">Projeto</option>
+            <option value="note">Nota</option>
+          </select>
+          <input id="memory-content" class="memory-input" type="text" maxlength="700" placeholder="Uma informação curta e útil" />
+          <button class="memory-action" onclick="adicionarMemoriaPessoal()">Adicionar</button>
+        </div>
+        <div id="memory-feedback" class="memory-feedback" role="status"></div>
+      </section>
+
+      <section class="memory-section">
+        <h3>Memórias salvas</h3>
+        <div id="memory-list" class="memory-list"></div>
+      </section>
+    </div>
+  </section>
+</div>
+
 <script>
   const API = window.location.origin;
   const chat = document.getElementById('chat');
@@ -970,6 +1198,7 @@
   let webEnabled = true;
   let reasoningMode = localStorage.getItem('keilinks_reasoning_mode') === 'always' ? 'always' : 'auto';
   let showReasoning = localStorage.getItem('keilinks_show_reasoning') !== 'false';
+  let memoryData = null;
 
   // ─── Auth ──────────────────────────────────────────────────────────────
 
@@ -1067,9 +1296,11 @@
   }
 
   function logout() {
+    fecharMemoriaPessoal();
     clearStoredUser();
     currentUser = null;
     currentChatId = null;
+    memoryData = null;
     if (statusInterval) {
       clearInterval(statusInterval);
       statusInterval = null;
@@ -1079,6 +1310,195 @@
     document.getElementById('login-user').value = '';
     document.getElementById('login-pass').value = '';
     document.getElementById('login-error').textContent = '';
+  }
+
+  // ─── Memória pessoal ───────────────────────────────────────────────────
+
+  function authHeaders(json = false) {
+    const headers = {};
+    if (json) headers['Content-Type'] = 'application/json';
+    if (currentUser?.token) headers['Authorization'] = `Bearer ${currentUser.token}`;
+    return headers;
+  }
+
+  async function lerResposta(res) {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.erro || `Erro ${res.status}`);
+    return data;
+  }
+
+  function feedbackMemoria(texto = '', tipo = '') {
+    const el = document.getElementById('memory-feedback');
+    el.textContent = texto;
+    el.className = `memory-feedback ${tipo}`.trim();
+  }
+
+  function fecharMemoriaPessoal() {
+    const modal = document.getElementById('memory-modal');
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function fecharMemoriaAoFundo(event) {
+    if (event.target === event.currentTarget) fecharMemoriaPessoal();
+  }
+
+  async function abrirMemoriaPessoal() {
+    if (!currentUser) return;
+    const modal = document.getElementById('memory-modal');
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    feedbackMemoria('Carregando memórias...');
+    await carregarMemoriaPessoal();
+  }
+
+  async function carregarMemoriaPessoal() {
+    if (!currentUser) return;
+    try {
+      const data = await lerResposta(await fetch(`${API}/api/me/memory`, {
+        headers: authHeaders()
+      }));
+      memoryData = data;
+      renderMemoriaPessoal();
+      feedbackMemoria('');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível carregar a memória.', 'error');
+    }
+  }
+
+  function renderMemoriaPessoal() {
+    if (!memoryData) return;
+    const { profile = {}, settings = {}, memories = [] } = memoryData;
+    document.getElementById('memory-profile-name').value = profile.nome || '';
+    document.getElementById('memory-enabled').checked = Boolean(settings.memory_enabled);
+    document.getElementById('history-enabled').checked = Boolean(settings.history_enabled);
+    document.getElementById('training-consent').checked = Boolean(settings.training_consent);
+
+    const categoryLabels = {
+      preference: 'Preferência',
+      profile: 'Perfil',
+      project: 'Projeto',
+      note: 'Nota'
+    };
+    const list = document.getElementById('memory-list');
+    list.replaceChildren();
+    if (!memories.length) {
+      const empty = document.createElement('div');
+      empty.className = 'memory-empty';
+      empty.textContent = 'Nenhuma memória salva ainda.';
+      list.appendChild(empty);
+      return;
+    }
+    memories.forEach(memory => {
+      const item = document.createElement('article');
+      item.className = 'memory-item';
+      const content = document.createElement('div');
+      const category = document.createElement('div');
+      category.className = 'memory-item-category';
+      category.textContent = categoryLabels[memory.category] || 'Nota';
+      const text = document.createElement('div');
+      text.className = 'memory-item-content';
+      text.textContent = memory.content;
+      content.append(category, text);
+
+      const actions = document.createElement('div');
+      actions.className = 'memory-item-actions';
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.textContent = 'Editar';
+      edit.addEventListener('click', () => editarMemoriaPessoal(memory));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'memory-delete';
+      remove.textContent = 'Apagar';
+      remove.addEventListener('click', () => apagarMemoriaPessoal(memory.id));
+      actions.append(edit, remove);
+      item.append(content, actions);
+      list.appendChild(item);
+    });
+  }
+
+  async function salvarPerfilMemoria() {
+    if (!currentUser) return;
+    const nome = document.getElementById('memory-profile-name').value.trim();
+    try {
+      const data = await lerResposta(await fetch(`${API}/api/me/profile`, {
+        method: 'PUT', headers: authHeaders(true), body: JSON.stringify({ nome })
+      }));
+      currentUser = { ...currentUser, nome: data.profile.nome };
+      setStoredUser(currentUser);
+      document.getElementById('user-name').textContent = currentUser.nome || currentUser.username;
+      if (memoryData) memoryData.profile = data.profile;
+      feedbackMemoria('Perfil salvo.', 'success');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível salvar o perfil.', 'error');
+    }
+  }
+
+  async function salvarConfiguracoesMemoria() {
+    if (!currentUser) return;
+    const body = {
+      memory_enabled: document.getElementById('memory-enabled').checked,
+      history_enabled: document.getElementById('history-enabled').checked,
+      training_consent: document.getElementById('training-consent').checked
+    };
+    try {
+      const data = await lerResposta(await fetch(`${API}/api/me/memory/settings`, {
+        method: 'PUT', headers: authHeaders(true), body: JSON.stringify(body)
+      }));
+      if (memoryData) memoryData.settings = data.settings;
+      feedbackMemoria('Controles de privacidade salvos.', 'success');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível salvar os controles.', 'error');
+    }
+  }
+
+  async function adicionarMemoriaPessoal() {
+    if (!currentUser) return;
+    const inputMemoria = document.getElementById('memory-content');
+    const content = inputMemoria.value.trim();
+    const category = document.getElementById('memory-category').value;
+    if (!content) {
+      feedbackMemoria('Escreva uma informação antes de adicionar.', 'error');
+      return;
+    }
+    try {
+      await lerResposta(await fetch(`${API}/api/me/memories`, {
+        method: 'POST', headers: authHeaders(true), body: JSON.stringify({ content, category })
+      }));
+      inputMemoria.value = '';
+      await carregarMemoriaPessoal();
+      feedbackMemoria('Memória adicionada.', 'success');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível adicionar a memória.', 'error');
+    }
+  }
+
+  async function editarMemoriaPessoal(memory) {
+    const content = window.prompt('Edite a memória:', memory.content);
+    if (content === null || !content.trim()) return;
+    try {
+      await lerResposta(await fetch(`${API}/api/me/memories/${memory.id}`, {
+        method: 'PATCH', headers: authHeaders(true), body: JSON.stringify({ content: content.trim() })
+      }));
+      await carregarMemoriaPessoal();
+      feedbackMemoria('Memória atualizada.', 'success');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível editar a memória.', 'error');
+    }
+  }
+
+  async function apagarMemoriaPessoal(memoryId) {
+    if (!window.confirm('Apagar esta memória?')) return;
+    try {
+      await lerResposta(await fetch(`${API}/api/me/memories/${memoryId}`, {
+        method: 'DELETE', headers: authHeaders()
+      }));
+      await carregarMemoriaPessoal();
+      feedbackMemoria('Memória apagada.', 'success');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível apagar a memória.', 'error');
+    }
   }
 
   // ─── Chats ─────────────────────────────────────────────────────────────
@@ -1536,7 +1956,7 @@
       carregarChats();
     } catch {
       removerDigitando();
-      adicionarMsg('Servidor offline. Rode: python api/servidor.py', 'kei');
+      adicionarMsg('Servidor offline. Rode: python -m api.servidor_v4', 'kei');
     }
 
     btn.disabled = false;
