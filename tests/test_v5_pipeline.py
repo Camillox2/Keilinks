@@ -55,6 +55,18 @@ class TestKeilinksV5(unittest.TestCase):
                 self.assertIsNotNone(param.grad, f"Gradiente nulo em {name}")
                 self.assertTrue(torch.isfinite(param.grad).all(), f"Gradiente infinito em {name}")
 
+    def test_training_path_can_drop_logits_before_backward(self):
+        """O caminho longo não mantém logits de 8k vivos sem necessidade."""
+        model = KeilinksV4(self.config)
+        input_ids = torch.randint(0, self.config.vocab_size, (2, 32))
+        labels = torch.randint(0, self.config.vocab_size, (2, 32))
+        logits, loss = model(input_ids, labels, return_logits=False)
+        self.assertIsNone(logits)
+        self.assertIsNotNone(loss)
+        assert loss is not None
+        loss.backward()
+        self.assertIsNotNone(model.token_embedding.weight.grad)
+
     def test_muon_hybrid_optimizer(self):
         """Valida se o otimizador Muon e o construtor híbrido executam o passo de otimização."""
         model = KeilinksV4(self.config)

@@ -54,6 +54,17 @@ class TestReasoningV4(unittest.TestCase):
         self.assertNotIn(PLAN_OPEN, parsed.final)
         self.assertNotIn(ANSWER_CLOSE, parsed.final)
 
+    def test_complete_protocol_exposes_a_short_summary_only(self) -> None:
+        parsed = parse_reasoning_output(
+            format_reasoning_target(
+                "Conferir a entrada, calcular e validar o resultado.",
+                "O valor final é 42.",
+            )
+        )
+        self.assertTrue(parsed.has_complete_protocol)
+        self.assertEqual(parsed.plan, "Conferir a entrada, calcular e validar o resultado.")
+        self.assertNotIn("[[", parsed.plan)
+
     def test_incomplete_protocol_never_leaks_complete_plan(self) -> None:
         raw = f"{PLAN_OPEN}Conferir números.{PLAN_CLOSE} Resposta curta"
         parsed = parse_reasoning_output(raw)
@@ -122,6 +133,9 @@ class TestReasoningV4(unittest.TestCase):
         server = Path("api/servidor_v4.py").read_text(encoding="utf-8")
         self.assertGreaterEqual(server.count("reasoning_mode=_reasoning_mode(payload)"), 2)
         self.assertIn('"raciocinio": answer.reasoning_mode', server)
+        self.assertIn('"resumo_raciocinio": plan or None', server)
+        self.assertIn("show_reasoning: showReasoning", frontend)
+        self.assertIn("anexarResumoRaciocinio", frontend)
 
 
 if __name__ == "__main__":

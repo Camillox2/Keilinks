@@ -32,7 +32,7 @@ from dados.tokenizador import Tokenizador
 from dados.retrieval import Retrieval
 from dados.knowledge import Knowledge
 from dados.database import (
-    inicializar_banco, migrar_json_para_mysql,
+    inicializar_banco, migrar_json_para_sqlite,
     conversa_salvar, conversa_historico,
     knowledge_total, knowledge_por_fonte,
     crawler_log_recentes, memoria_get, memoria_set, memoria_todos,
@@ -146,7 +146,7 @@ def inicializar():
 
     try:
         if knowledge_total() == 0:
-            migrar_json_para_mysql(BASE_DIR)
+            migrar_json_para_sqlite(BASE_DIR)
     except Exception as e:
         print(f"[Migracao] {e}")
 

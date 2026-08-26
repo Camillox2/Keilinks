@@ -206,8 +206,12 @@ class KeilinksV4(nn.Module):
             return False
         return self.checkpoint_mode == "full" or layer_idx % self.checkpoint_every == 0
 
-    def forward(self, input_ids: torch.Tensor,
-                labels: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        labels: Optional[torch.Tensor] = None,
+        return_logits: bool = True,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
         _, seq_len = input_ids.shape
         if seq_len > self.config.context_length:
             raise ValueError(f"Sequência {seq_len} excede contexto {self.config.context_length}")
@@ -228,6 +232,11 @@ class KeilinksV4(nn.Module):
         if labels is not None:
             loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
                                    labels.reshape(-1), ignore_index=-100)
+        # No treino, logits gigantes não são necessários após a cross-entropy.
+        # Não devolvê-los reduz pressão de memória e evita que uma saída viva
+        # do CUDA Graph atravesse a próxima recomputação do checkpoint.
+        if labels is not None and not return_logits:
+            return None, loss
         return logits, loss
 
     @torch.no_grad()

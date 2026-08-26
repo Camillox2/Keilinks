@@ -435,7 +435,8 @@
     .web-toggle:hover { border-color: #22c55e; color: #4ade80; }
     .web-toggle.ativo { border-color: #22c55e; background: rgba(34,197,94,0.15); color: #4ade80; }
 
-    .reasoning-toggle {
+    .reasoning-toggle,
+    .reasoning-visibility-toggle {
       margin-left: 6px;
       padding: 4px 10px;
       border-radius: 20px;
@@ -446,8 +447,10 @@
       cursor: pointer;
       transition: all 0.2s;
     }
-    .reasoning-toggle:hover { border-color: var(--purple2); color: var(--purple2); }
-    .reasoning-toggle.ativo {
+    .reasoning-toggle:hover,
+    .reasoning-visibility-toggle:hover { border-color: var(--purple2); color: var(--purple2); }
+    .reasoning-toggle.ativo,
+    .reasoning-visibility-toggle.ativo {
       border-color: var(--purple2);
       background: rgba(168,85,247,0.15);
       color: #d8b4fe;
@@ -494,6 +497,31 @@
     .badge.web   { background: rgba(34,197,94,0.15); color: #4ade80; }
     .badge.flash { background: rgba(251,191,36,0.15); color: #fbbf24; }
     .badge.ultra { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+    .reasoning-summary {
+      margin-top: 10px;
+      border: 1px solid rgba(168,85,247,0.34);
+      border-radius: 9px;
+      background: rgba(124,58,237,0.08);
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow: hidden;
+    }
+    .reasoning-summary summary {
+      padding: 8px 10px;
+      color: #d8b4fe;
+      cursor: pointer;
+      font-weight: 600;
+      list-style: none;
+    }
+    .reasoning-summary summary::-webkit-details-marker { display: none; }
+    .reasoning-summary summary::before { content: '🧠 '; }
+    .reasoning-summary-text {
+      padding: 0 10px 10px;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+    }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
@@ -897,6 +925,7 @@
       </span>
       <button class="web-toggle ativo" id="btn-web" onclick="toggleWeb()" title="Pesquisa na web">&#x1F310; Web</button>
       <button class="reasoning-toggle" id="btn-raciocinio" onclick="toggleRaciocinio()" aria-pressed="false" title="Pedir uma resposta mais cuidadosa">&#x1F9E0; Raciocínio</button>
+      <button class="reasoning-visibility-toggle" id="btn-mostrar-raciocinio" onclick="toggleMostrarRaciocinio()" aria-pressed="true" title="Mostrar o plano resumido usado na resposta">&#x1F441; Plano</button>
       <button class="crawler-toggle" id="btn-crawler" onclick="toggleCrawlerPanel()" title="Ver atividade do crawler">Log</button>
     </div>
 
@@ -940,6 +969,7 @@
   let statusInterval = null;
   let webEnabled = true;
   let reasoningMode = localStorage.getItem('keilinks_reasoning_mode') === 'always' ? 'always' : 'auto';
+  let showReasoning = localStorage.getItem('keilinks_show_reasoning') !== 'false';
 
   // ─── Auth ──────────────────────────────────────────────────────────────
 
@@ -1204,6 +1234,21 @@
     renderRaciocinioToggle();
   }
 
+  function renderMostrarRaciocinioToggle() {
+    const visibilityBtn = document.getElementById('btn-mostrar-raciocinio');
+    visibilityBtn.classList.toggle('ativo', showReasoning);
+    visibilityBtn.setAttribute('aria-pressed', String(showReasoning));
+    visibilityBtn.title = showReasoning
+      ? 'Plano resumido será mostrado quando a resposta usar raciocínio'
+      : 'Plano resumido está oculto';
+  }
+
+  function toggleMostrarRaciocinio() {
+    showReasoning = !showReasoning;
+    localStorage.setItem('keilinks_show_reasoning', String(showReasoning));
+    renderMostrarRaciocinioToggle();
+  }
+
   // ─── Status ────────────────────────────────────────────────────────────
 
   async function verificarStatus() {
@@ -1295,6 +1340,22 @@
     return div;
   }
 
+  function anexarResumoRaciocinio(msgEl, resumo) {
+    if (!showReasoning || !resumo || !msgEl) return;
+    const details = document.createElement('details');
+    details.className = 'reasoning-summary';
+    details.open = true;
+    const summary = document.createElement('summary');
+    summary.textContent = 'Plano resumido usado nesta resposta';
+    const content = document.createElement('div');
+    content.className = 'reasoning-summary-text';
+    // O plano vem do modelo: textContent evita executar HTML/Markdown gerado.
+    content.textContent = resumo;
+    details.append(summary, content);
+    msgEl.querySelector('.bubble').appendChild(details);
+    scrollToBottom();
+  }
+
   let typingTimer = null;
 
   function mostrarDigitando() {
@@ -1381,7 +1442,8 @@
         chat_id: currentChatId,
         token: currentUser ? currentUser.token : null,
         web_enabled: webEnabled,
-        reasoning_mode: reasoningMode
+        reasoning_mode: reasoningMode,
+        show_reasoning: showReasoning
       };
 
       // Tenta streaming primeiro, fallback pro modo normal
@@ -1421,11 +1483,12 @@
                   if (textoAcumulado) {
                     bubble.innerHTML = renderMarkdown(textoAcumulado);
                     const bdiv = document.createElement('div');
-                    const reasoningBadge = reasoningMode === 'always'
+                    const reasoningBadge = evt.usou_raciocinio
                       ? '<span class="badge ultra">&#x1F9E0; Raciocínio aprofundado</span>'
                       : '';
                     bdiv.innerHTML = `<span class="badge ultra">${modeloAtual}</span> ${reasoningBadge}`;
                     bubble.appendChild(bdiv);
+                    anexarResumoRaciocinio(msgEl, evt.resumo_raciocinio);
                   }
                 }
               } catch {}
@@ -1454,7 +1517,7 @@
           if (f === 'knowledge') badges.push(`<span class="badge flash">Aprendido</span>`);
           if (f === 'modelo')    badges.push(`<span class="badge ultra">${data.modelo}</span>`);
           if (f === 'retrieval') badges.push(`<span class="badge flash">Base</span>`);
-          if (reasoningMode === 'always') badges.push('<span class="badge ultra">&#x1F9E0; Raciocínio aprofundado</span>');
+          if (data.usou_raciocinio) badges.push('<span class="badge ultra">&#x1F9E0; Raciocínio aprofundado</span>');
           if (data.confianca !== undefined) {
             const cor = data.confianca >= 80 ? '#4ade80' : data.confianca >= 50 ? '#fbbf24' : '#f87171';
             badges.push(`<span class="badge" style="background:rgba(255,255,255,0.05);color:${cor}">${data.confianca}% confianca</span>`);
@@ -1464,6 +1527,7 @@
             bdiv.innerHTML = badges.join(' ');
             msgEl.querySelector('.bubble').appendChild(bdiv);
           }
+          anexarResumoRaciocinio(msgEl, data.resumo_raciocinio);
         } else {
           adicionarMsg('Nao consegui processar isso.', 'kei');
         }
@@ -1546,6 +1610,7 @@
   // ─── Init ──────────────────────────────────────────────────────────────
 
   renderRaciocinioToggle();
+  renderMostrarRaciocinioToggle();
   const stored = getStoredUser();
   if (stored) {
     entrarApp(stored);

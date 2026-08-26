@@ -30,6 +30,7 @@ class TestModernV4Pipeline(unittest.TestCase):
         train = get_train_config("rtx5050_380m")
         self.assertEqual(train.grad_accum_steps, 4)
         self.assertEqual(train.checkpoint_mode, "full")
+        self.assertEqual(train.compile_mode, "default")
 
     def test_conservative_web_router(self) -> None:
         self.assertFalse(deve_pesquisar("Oi, tudo bem?"))

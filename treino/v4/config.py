@@ -152,6 +152,11 @@ TRAIN_PROFILES: dict[str, TrainConfig] = {
         micro_batch_size=1, grad_accum_steps=4,
         max_steps=160_000, learning_rate=3e-4, min_learning_rate=3e-5,
         warmup_steps=2_000, checkpoint_mode="full", checkpoint_every=1,
+        # ``reduce-overhead`` usa CUDA Graphs e falhou com checkpointing total
+        # + quatro microbatches no PyTorch 2.11 local. ``max-autotune`` sem
+        # graphs ficou minutos compilando nesta GPU; o modo padrão é estável,
+        # usa Inductor e não adiciona esse custo de cold-start.
+        compile_mode="default",
         optimizer="adamw_8bit",
     ),
     "rtx5050_500m": TrainConfig(
@@ -185,6 +190,7 @@ TRAIN_PROFILES: dict[str, TrainConfig] = {
         warmup_steps=200, weight_decay=0.05,
         eval_interval=50, save_interval=100,
         checkpoint_mode="full", checkpoint_every=1,
+        compile_mode="default",
         optimizer="adamw_8bit",
     ),
     "rtx5050_sft_500m": TrainConfig(

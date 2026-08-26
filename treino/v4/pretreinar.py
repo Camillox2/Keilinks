@@ -11,9 +11,9 @@ import json
 import math
 import os
 import time
+from collections.abc import Iterator
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Iterator, Tuple
 
 import numpy as np
 import torch
@@ -178,7 +178,7 @@ class TokenMemmap:
         rng: np.random.Generator,
         batch_size: int,
         context: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if self.length <= context + 1:
             raise ValueError("Corpus menor que o contexto")
         starts = rng.integers(
@@ -257,6 +257,23 @@ def validate_resume(
             f"Checkpoint {checkpoint_path} incompatível nos campos: "
             f"{different}"
         )
+
+
+def mark_compiled_microbatch(compiled: bool) -> None:
+    """Delimita microbatches para CUDA Graphs durante acumulação de gradiente.
+
+    ``reduce-overhead`` habilita CUDA Graphs. Com checkpointing completo, a
+    heurística automática pode confundir recomputação do backward com uma nova
+    invocação e sobrescrever saídas ainda vivas. A API oficial marca a fronteira
+    de cada microbatch sem afetar execução eager ou modos sem CUDA Graphs.
+    """
+
+    if not compiled:
+        return
+    compiler = getattr(torch, "compiler", None)
+    marker = getattr(compiler, "cudagraph_mark_step_begin", None)
+    if callable(marker):
+        marker()
 
 
 def pretrain(args: argparse.Namespace) -> None:
@@ -364,6 +381,7 @@ def pretrain(args: argparse.Namespace) -> None:
     del checkpoint
 
     executable = model
+    compiled = False
     if (
         not args.no_compile
         and hasattr(torch, "compile")
@@ -375,6 +393,7 @@ def pretrain(args: argparse.Namespace) -> None:
                 mode=train_config.compile_mode,
                 fullgraph=False,
             )
+            compiled = True
             print(f"torch.compile ativo: {train_config.compile_mode}")
         except Exception as exc:
             print(f"[aviso] torch.compile falhou: {exc}")
@@ -439,14 +458,20 @@ def pretrain(args: argparse.Namespace) -> None:
             )
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
+            mark_compiled_microbatch(compiled)
             with autocast_context(
                 device, train_config.precision
             ):
-                _, loss = executable(x, y)
+                _, loss = executable(x, y, False)
                 if loss is None or not torch.isfinite(loss):
                     raise RuntimeError(
                         f"Loss inválido no passo {step}: {loss}"
                     )
+                if compiled:
+                    # Desacopla a saída do grafo CUDA antes do backward. Isso
+                    # é recomendado pelo PyTorch quando a saída poderia ser
+                    # sobrescrita pela recomputação do checkpoint.
+                    loss = loss.clone()
                 scaled_loss = (
                     loss / train_config.grad_accum_steps
                 )

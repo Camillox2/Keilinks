@@ -1,7 +1,7 @@
 """
 Importador de datasets externos para treino da Keilinks
 Baixa datasets do HuggingFace — factuais e conversacionais
-Salva em conversas.txt (formato treino) + knowledge no MySQL
+Salva em conversas.txt (formato treino) + knowledge no SQLite local
 
 Uso:
   python treino/importar_datasets.py                       # importa tudo
@@ -24,7 +24,7 @@ sys.path.insert(0, BASE_DIR)
 os.chdir(BASE_DIR)
 
 from datasets import load_dataset
-from dados.database import get_conn, knowledge_adicionar
+from dados.database import knowledge_adicionar
 
 CONVERSAS_PATH = os.path.join(BASE_DIR, 'dados', 'conversas.txt')
 STATS = {'treino': 0, 'knowledge': 0, 'duplicados': 0, 'erros': 0}
@@ -53,8 +53,8 @@ def salvar_par_treino(pergunta, resposta, arquivo):
     return True
 
 
-def salvar_knowledge_mysql(pergunta, resposta, fonte, categoria='geral'):
-    """Salva no MySQL (tabela knowledge)"""
+def salvar_knowledge_local(pergunta, resposta, fonte, categoria='geral'):
+    """Salva no banco SQLite local (tabela knowledge)."""
     p = limpar_texto(pergunta)
     r = limpar_texto(resposta)
     if not p or not r:
@@ -105,7 +105,7 @@ def importar_alpaca(arquivo):
 
         # Salva no knowledge (amostra — não salva tudo pra não poluir)
         if count % 5 == 0:  # 1 a cada 5 vai pro knowledge
-            if salvar_knowledge_mysql(pergunta, resposta, 'alpaca', 'instrucao'):
+            if salvar_knowledge_local(pergunta, resposta, 'alpaca', 'instrucao'):
                 STATS['knowledge'] += 1
 
         if count % 5000 == 0 and count > 0:
@@ -151,7 +151,7 @@ def importar_dolly(arquivo):
             count += 1
 
         if count % 3 == 0:  # 1 a cada 3 pro knowledge (dolly tem qualidade alta)
-            if salvar_knowledge_mysql(pergunta, resposta, 'dolly', 'instrucao'):
+            if salvar_knowledge_local(pergunta, resposta, 'dolly', 'instrucao'):
                 STATS['knowledge'] += 1
 
         if count % 5000 == 0 and count > 0:
@@ -202,7 +202,7 @@ def importar_squad(arquivo):
             count += 1
 
         if count % 10 == 0:  # SQuAD tem muitas respostas curtas, amostra menor
-            if salvar_knowledge_mysql(pergunta, resposta, 'squad', 'qa'):
+            if salvar_knowledge_local(pergunta, resposta, 'squad', 'qa'):
                 STATS['knowledge'] += 1
 
         if count % 10000 == 0 and count > 0:
@@ -265,7 +265,7 @@ def importar_oasst(arquivo):
             count += 1
 
         if count % 2 == 0:  # metade pro knowledge
-            if salvar_knowledge_mysql(pergunta, resposta, 'openassistant', 'conversa'):
+            if salvar_knowledge_local(pergunta, resposta, 'openassistant', 'conversa'):
                 STATS['knowledge'] += 1
 
     print(f"  OpenAssistant (PT) concluído: {count} pares de treino")
@@ -309,7 +309,7 @@ def importar_wikipedia(arquivo):
             count += 1
 
         # Toda entrada da Wikipedia vai pro knowledge
-        if salvar_knowledge_mysql(pergunta, resposta, 'wikipedia_dataset', 'enciclopedia'):
+        if salvar_knowledge_local(pergunta, resposta, 'wikipedia_dataset', 'enciclopedia'):
             STATS['knowledge'] += 1
 
         # Cria perguntas extras se o artigo for grande
@@ -726,7 +726,7 @@ def main():
     print("  RESULTADO FINAL")
     print("=" * 60)
     print(f"  Novos pares de treino:   {STATS['treino']:,}")
-    print(f"  Novos fatos no MySQL:    {STATS['knowledge']:,}")
+    print(f"  Novos fatos no SQLite:   {STATS['knowledge']:,}")
     print(f"  Erros:                   {STATS['erros']}")
     print(f"  Total conversas.txt:     {pares_final:,} pares (antes: {pares_existentes:,})")
     print("=" * 60)

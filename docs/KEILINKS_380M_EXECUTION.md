@@ -22,7 +22,12 @@ Use `core_380m_modern`, não `core_380m_v5_experimental`, para o treino longo:
 - QK-Norm e RoPE com theta 500.000 para estabilidade e contexto longo;
 - **soft-capping desativado**. O experimento de soft-capping materializa `QKᵀ`
   e perde o caminho SDPA/Flash Attention, o que é inadequado para 8 GB;
-- BF16, TF32, AdamW 8-bit, `torch.compile` e checkpointing **completo**.
+- BF16, TF32, AdamW 8-bit, `torch.compile` em `default` e checkpointing
+  **completo**. O modo `reduce-overhead` foi benchmarkado, mas nesta
+  instalação de PyTorch 2.11 falha com CUDA Graphs quando combinado com os
+  quatro microbatches de 8k. `max-autotune-no-cudagraphs` evita esse defeito,
+  mas teve cold-start desproporcional nesta GPU; o modo `default` é o caminho
+  estável a validar no burn-in.
 
 O perfil operacional usa contexto nativo de **8.192 tokens**, batch físico 1 e
 quatro microbatches por atualização. Assim preserva 32.768 tokens por passo de
@@ -37,7 +42,7 @@ BF16 do Core 380M:
 | 2.048, seletivo | 4,87 GB | 2.181 tok/s | compatibilidade 2k |
 | 4.096, completo | 4,14 GB | 2.214 tok/s | cabe, mas 8k é preferível |
 | 8.192, completo | 6,56 GB | 2.154 tok/s | estável em cinco passos |
-| 8.192, completo + `torch.compile` | 5,45 GB | 2.651 tok/s | perfil operacional |
+| 8.192, completo + `reduce-overhead` | 5,45 GB | 2.651 tok/s | probe; não usar no ciclo longo |
 | 16.384, completo | 9,92 GB | 790 tok/s | não usar para treino nesta GPU |
 
 O prefill de inferência cabe até 16k (3,47 GB de pico), mas isso não prova
@@ -52,7 +57,9 @@ um download que termina o modelo.
 O Core não recebe uma cadeia de pensamento longa, opaca ou copiada da web. Ele
 recebe um **currículo de plano curto**: dados relevantes, ferramenta necessária
 (por exemplo, busca web) e uma checagem. A resposta final é treinada separada
-do plano e o runtime remove o plano antes de salvar ou exibir a conversa.
+do plano. O histórico persiste somente a resposta final; a interface pode,
+quando o usuário habilitar **👁 Plano**, exibir o plano curto completo que foi
+gerado para aquela resposta.
 
 O arquivo `treino/v4/preparar_raciocinio.py` gera 640 exemplos PT-BR
 determinísticos e verificáveis: contas, porcentagens, condições lógicas,
@@ -96,8 +103,11 @@ curto não passe inteiro apenas aquecendo a taxa de aprendizado.
 Na interface, o botão **🧠 Raciocínio** envia `reasoning_mode=always` para a
 próxima resposta. Desligado, o runtime usa `auto` e só pede plano em contas,
 comparações, depuração e decisões mais complexas. A API ainda aceita `never`
-para desabilitar o protocolo. O usuário vê apenas a resposta final; não há
-exposição de raciocínio interno ou de conteúdo de RAG/web.
+para desabilitar o protocolo. **👁 Plano** controla `show_reasoning`; quando
+ativo, mostra o máximo de 64 palavras do plano apenas se os marcadores de plano
+e resposta foram fechados corretamente. Isso é uma explicação curta do modelo,
+não um traçado interno token a token, e nunca exibe instruções cruas
+recuperadas de RAG ou da web.
 
 Antes de promover o checkpoint SFT, execute a avaliação congelada:
 
@@ -200,12 +210,25 @@ não é uma garantia jurídica ou de anonimização.
 8. DPO/GRPO só entra após pares de preferência corrigidos e aprovados. Feedback
    de usuário com consentimento não deve virar treino automático sem curadoria.
 
+## Banco local sem MySQL
+
+O servidor legado agora usa SQLite em `keilinks_data/keilinks.sqlite3`, criado
+automaticamente no primeiro boot. Ele guarda usuários, chats, histórico,
+memória, log do crawler e knowledge lexical (FTS5 quando disponível). O arquivo
+e o segredo local de autenticação ficam fora do Git. Para mudar o local, defina
+`KEILINKS_DB_PATH`. A API é local por padrão; exposição fora de localhost ainda
+exige uma chave de API forte — SQLite não é banco para múltiplas instâncias ou
+compartilhamento em rede.
+
 ## Linux/WSL e aceleração sem ilusão de hardware
 
 O benchmark 8k acima foi feito no Windows e já usa BF16, TF32, GQA, AdamW
-8-bit, checkpointing completo e `torch.compile`. A medição de 2.651 tok/s é um
-benchmark de cinco passos; o throughput do treino longo pode oscilar por
-validação, salvamento, temperatura e concorrência do Windows.
+8-bit, checkpointing completo e `torch.compile`. A medição de 2.651 tok/s veio
+de `reduce-overhead`, que falha com os quatro microbatches no PyTorch 2.11
+instalado; ela não deve ser tratada como vazão contratada. O ciclo real usa
+`default` e precisa registrar a primeira janela de 20 passos antes de fixarmos
+uma taxa. Temperatura, validação, salvamento e concorrência do Windows também
+podem variar a medição.
 
 Na verificação de 26/08/2026, `wsl.exe` existe, mas não há uma distribuição
 Linux registrada nem serviços WSL disponíveis; a consulta/ativação dos recursos

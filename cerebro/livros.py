@@ -5,7 +5,7 @@ Fontes:
   - Wikipedia (artigos sobre comunicacao, psicologia, livros famosos)
   - Open Library (resumos de livros)
   - Dataset interno de padroes de conversacao
-Salva conteudo no MySQL como knowledge para treinar o modelo.
+Salva conteúdo no SQLite local como knowledge para retrieval.
 """
 
 import os
@@ -287,7 +287,7 @@ CONHECIMENTO_CONVERSACAO = [
 
 
 def importar_conhecimento_conversacao() -> int:
-    """Importa dataset interno de conversacao pro MySQL"""
+    """Importa dataset interno de conversa para o SQLite local."""
     novos = 0
     for pergunta, resposta in CONHECIMENTO_CONVERSACAO:
         if knowledge_existe(pergunta):
@@ -332,5 +332,5 @@ def crawl_livros_completo() -> int:
 if __name__ == '__main__':
     print("Buscando conteudo sobre conversacao, autoajuda e psicologia...\n")
     novos = crawl_livros_completo()
-    print(f"\nConcluido: {novos} novos conteudos salvos no MySQL")
+    print(f"\nConcluído: {novos} novos conteúdos salvos no SQLite")
     print(f"Total knowledge: {knowledge_total()}")

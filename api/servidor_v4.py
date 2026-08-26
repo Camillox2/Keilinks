@@ -87,7 +87,7 @@ def _initialize_data_systems() -> None:
     legacy.inicializar_banco()
     try:
         if legacy.knowledge_total() == 0:
-            legacy.migrar_json_para_mysql(str(BASE_DIR))
+            legacy.migrar_json_para_sqlite(str(BASE_DIR))
     except Exception as exc:
         print(f"[V4 migração] {exc}")
     legacy.retrieval.carregar(
@@ -166,6 +166,63 @@ def _reasoning_mode(payload: dict) -> str:
     )
 
 
+def _show_reasoning(payload: dict) -> bool:
+    """Exibe somente o plano curto completo quando o cliente pedir."""
+
+    value = payload.get("show_reasoning", payload.get("mostrar_raciocinio", False))
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "sim", "on"}
+
+
+def _request_context(payload: dict, message: str) -> dict:
+    user = _authenticated_user(payload)
+    user_id = user["id"] if user else None
+    chat_id = payload.get("chat_id")
+    history = _history(chat_id, user_id)
+    try:
+        memory_context = legacy.memoria.gerar_contexto(user_id=user_id)
+    except Exception:
+        memory_context = ""
+    semantic_context, semantic_score = _semantic_context(message)
+    return {
+        "user": user,
+        "user_id": user_id,
+        "chat_id": chat_id,
+        "history": history,
+        "memory_context": memory_context,
+        "semantic_context": semantic_context,
+        "semantic_score": semantic_score,
+    }
+
+
+def _persist_answer(message: str, answer, context: dict) -> str:
+    """Persiste só a resposta final; plano de raciocínio nunca vai ao histórico."""
+
+    source_name = "modelo_v4_web" if answer.used_web else "modelo_v4"
+    user = context["user"]
+    user_id = context["user_id"]
+    chat_id = context["chat_id"]
+    try:
+        legacy.memoria.atualizar(message, answer.text, user_id=user_id)
+    except Exception:
+        pass
+    try:
+        legacy.conversa_salvar(
+            message, answer.text, source_name, chat_id=chat_id, usuario_id=user_id
+        )
+    except Exception as exc:
+        print(f"[V4 salvar conversa] {exc}")
+    if chat_id and user:
+        try:
+            messages = legacy.chat_mensagens(chat_id, user_id)
+            if messages and len(messages) == 1:
+                legacy.chat_atualizar_titulo(chat_id, message[:80])
+        except Exception:
+            pass
+    return source_name
+
+
 def chat_v4():
     if runtime is None:
         if _original_chat is None:
@@ -176,22 +233,15 @@ def chat_v4():
     message = str(payload.get("mensagem", "")).strip()
     if not message:
         return jsonify({"erro": "Mensagem vazia"}), 400
-    user = _authenticated_user(payload)
-    user_id = user["id"] if user else None
-    chat_id = payload.get("chat_id")
-    history = _history(chat_id, user_id)
-    try:
-        memory_context = legacy.memoria.gerar_contexto(user_id=user_id)
-    except Exception:
-        memory_context = ""
-    semantic_context, semantic_score = _semantic_context(message)
+    context = _request_context(payload, message)
+    show_reasoning = _show_reasoning(payload)
 
     try:
         answer = runtime.answer(
             message,
-            history=history,
-            memory_context=memory_context,
-            semantic_context=semantic_context,
+            history=context["history"],
+            memory_context=context["memory_context"],
+            semantic_context=context["semantic_context"],
             web_enabled=bool(payload.get("web_enabled", True)),
             web_mode=str(payload.get("web_mode", "auto")),
             reasoning_mode=_reasoning_mode(payload),
@@ -203,25 +253,8 @@ def chat_v4():
         print(f"[Keilinks V4 chat] {exc}")
         return jsonify({"erro": "Falha ao gerar resposta", "detalhe": str(exc)}), 500
 
-    source_name = "modelo_v4_web" if answer.used_web else "modelo_v4"
-    try:
-        legacy.memoria.atualizar(message, answer.text, user_id=user_id)
-    except Exception:
-        pass
-    try:
-        legacy.conversa_salvar(
-            message, answer.text, source_name,
-            chat_id=chat_id, usuario_id=user_id,
-        )
-    except Exception as exc:
-        print(f"[V4 salvar conversa] {exc}")
-    if chat_id and user:
-        try:
-            messages = legacy.chat_mensagens(chat_id, user_id)
-            if messages and len(messages) == 1:
-                legacy.chat_atualizar_titulo(chat_id, message[:80])
-        except Exception:
-            pass
+    source_name = _persist_answer(message, answer, context)
+    plan = answer.reasoning_summary if show_reasoning else ""
 
     return jsonify({
         "resposta": answer.text,
@@ -229,15 +262,21 @@ def chat_v4():
         "fonte": source_name,
         "usou_web": answer.used_web,
         "fontes": answer.sources,
-        "confianca": 88 if answer.used_web else (75 if semantic_score >= 0.5 else 65),
+        "confianca": 88 if answer.used_web else (
+            75 if context["semantic_score"] >= 0.5 else 65
+        ),
         "prompt_tokens": answer.prompt_tokens,
         "generated_tokens": answer.generated_tokens,
         "raciocinio": answer.reasoning_mode,
         "usou_raciocinio": answer.used_reasoning,
-        "pensamento": [
+        "resumo_raciocinio": plan or None,
+        # Compatibilidade: pensamento agora é o plano realmente gerado, e não
+        # uma lista de telemetria que poderia ser confundida com raciocínio.
+        "pensamento": [plan] if plan else [],
+        "telemetria": [
             "Runtime V4",
-            f"Histórico: {len(history)} turnos",
-            f"RAG score: {semantic_score:.2f}",
+            f"Histórico: {len(context['history'])} turnos",
+            f"RAG score: {context['semantic_score']:.2f}",
             f"Fontes web: {len(answer.sources)}",
             f"Raciocínio: {answer.reasoning_mode}",
         ],
@@ -254,22 +293,34 @@ def chat_stream_v4():
     message = str(payload.get("mensagem", "")).strip()
     if not message:
         return jsonify({"erro": "Mensagem vazia"}), 400
+    context = _request_context(payload, message)
+    show_reasoning = _show_reasoning(payload)
 
     def generate_event():
         try:
             answer = runtime.answer(
                 message,
+                history=context["history"],
+                memory_context=context["memory_context"],
+                semantic_context=context["semantic_context"],
                 web_enabled=bool(payload.get("web_enabled", True)),
                 web_mode=str(payload.get("web_mode", "auto")),
                 reasoning_mode=_reasoning_mode(payload),
                 max_new_tokens=min(int(payload.get("max_tokens", 256)), 512),
                 temperature=float(payload.get("temperatura", 0.75)),
+                top_p=float(payload.get("top_p", 0.9)),
             )
+            source_name = _persist_answer(message, answer, context)
+            plan = answer.reasoning_summary if show_reasoning else ""
             yield "data: " + json.dumps({
                 "token": answer.text,
                 "done": True,
                 "fontes": answer.sources,
+                "fonte": source_name,
                 "raciocinio": answer.reasoning_mode,
+                "usou_raciocinio": answer.used_reasoning,
+                "resumo_raciocinio": plan or None,
+                "pensamento": [plan] if plan else [],
             }, ensure_ascii=False) + "\n\n"
         except Exception as exc:
             yield "data: " + json.dumps({

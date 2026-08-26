@@ -36,6 +36,7 @@ class RuntimeAnswer:
     generated_tokens: int
     reasoning_mode: str = "auto"
     used_reasoning: bool = False
+    reasoning_summary: str = ""
 
 
 class V4Runtime:
@@ -286,7 +287,8 @@ class V4Runtime:
         for marker in ("<fim>", "<vitor>", "<sistema>", "<keilinks>"):
             if marker in text:
                 text = text.split(marker, 1)[0].strip()
-        text = parse_reasoning_output(text).final
+        parsed_reasoning = parse_reasoning_output(text)
+        text = parsed_reasoning.final
         if not text:
             text = (
                 "Não consegui formular uma resposta confiável agora. "
@@ -303,4 +305,9 @@ class V4Runtime:
             generated_tokens=len(generated),
             reasoning_mode=reasoning_mode,
             used_reasoning=use_reasoning,
+            # Só uma estrutura completa pode aparecer ao usuário. Um plano
+            # cortado no fim da geração não é uma explicação confiável.
+            reasoning_summary=(
+                parsed_reasoning.plan if parsed_reasoning.has_complete_protocol else ""
+            ),
         )

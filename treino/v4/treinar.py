@@ -11,10 +11,10 @@ import math
 import os
 import random
 import time
+from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Iterator, Tuple
 
 import numpy as np
 import torch
@@ -31,6 +31,17 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def mark_compiled_microbatch(compiled: bool) -> None:
+    """Marca a fronteira de microbatch para CUDA Graphs do ``torch.compile``."""
+
+    if not compiled:
+        return
+    compiler = getattr(torch, "compiler", None)
+    marker = getattr(compiler, "cudagraph_mark_step_begin", None)
+    if callable(marker):
+        marker()
 
 
 def cosine_lr(step: int, total: int, warmup: int,
@@ -78,7 +89,7 @@ def steps_for_epochs(dataset_blocks: int, config: TrainConfig, epochs: float) ->
     return max(1, math.ceil(updates_per_epoch * epochs))
 
 
-def infinite_batches(loader: DataLoader) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+def infinite_batches(loader: DataLoader) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
     while True:
         yield from loader
 
@@ -354,11 +365,13 @@ def train(args: argparse.Namespace) -> None:
     del bootstrap
 
     executable = model
+    compiled = False
     if not args.no_compile and hasattr(torch, "compile") and device.type == "cuda":
         try:
             executable = torch.compile(
                 model, mode=train_config.compile_mode, fullgraph=False
             )
+            compiled = True
             print(f"torch.compile ativo: {train_config.compile_mode}")
         except Exception as exc:
             print(f"[aviso] torch.compile falhou: {exc}")
@@ -398,10 +411,13 @@ def train(args: argparse.Namespace) -> None:
                 raise RuntimeError(
                     "Batch sem tokens do assistant; reconstrua o dataset"
                 )
+            mark_compiled_microbatch(compiled)
             with autocast_context(device, train_config.precision):
-                _, loss = executable(input_ids, labels)
+                _, loss = executable(input_ids, labels, False)
                 if loss is None or not torch.isfinite(loss):
                     raise RuntimeError(f"Loss inválido no passo {step}: {loss}")
+                if compiled:
+                    loss = loss.clone()
                 scaled_loss = loss / train_config.grad_accum_steps
             scaler.scale(scaled_loss).backward()
             tokens_window += target_tokens

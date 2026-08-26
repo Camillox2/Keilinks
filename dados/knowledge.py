@@ -1,10 +1,14 @@
-"""
-Knowledge Storage da Keilinks v6
-MySQL + busca semantica por embeddings
-FULLTEXT como fallback se embeddings indisponivel
+"""Knowledge Storage da Keilinks.
+
+SQLite FTS5 é o fallback lexical local; embeddings continuam opcionais.
 """
 
-from dados.database import knowledge_adicionar, knowledge_buscar, knowledge_total, knowledge_por_fonte
+from dados.database import (
+    knowledge_adicionar,
+    knowledge_buscar,
+    knowledge_por_fonte,
+    knowledge_total,
+)
 
 # Busca semantica no knowledge (lazy init)
 _indice_knowledge = None
@@ -18,15 +22,18 @@ def _iniciar_knowledge_embeddings():
         return
 
     try:
-        from cerebro.embeddings import IndiceSemantico
-        from dados.database import get_conn
         import os
 
+        from cerebro.embeddings import IndiceSemantico
+        from dados.database import get_conn
+
         conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT pergunta, resposta FROM knowledge ORDER BY id")
-            rows = cur.fetchall()
-        conn.close()
+        try:
+            rows = conn.execute(
+                "SELECT pergunta, resposta FROM knowledge ORDER BY id"
+            ).fetchall()
+        finally:
+            conn.close()
 
         if not rows:
             _knowledge_ok = False
@@ -47,14 +54,14 @@ def _iniciar_knowledge_embeddings():
 class Knowledge:
     def __init__(self, caminho: str = None):
         self._caminho = caminho
-        print(f"[Knowledge] MySQL conectado ({self.total()} fatos)")
+        print(f"[Knowledge] SQLite local conectado ({self.total()} fatos)")
 
     def carregar(self):
-        """Noop — MySQL e sempre atualizado"""
+        """Noop — SQLite persiste a cada operação."""
         pass
 
     def salvar(self):
-        """Noop — MySQL persiste automaticamente"""
+        """Noop — SQLite persiste automaticamente."""
         pass
 
     def iniciar_embeddings(self):
@@ -85,7 +92,7 @@ class Knowledge:
             except Exception:
                 pass
 
-        # Fallback: FULLTEXT MySQL
+        # Fallback: SQLite FTS5 (ou LIKE se FTS5 não estiver disponível).
         resultados = knowledge_buscar(pergunta, limite=1)
         if resultados:
             return resultados[0]['resposta']

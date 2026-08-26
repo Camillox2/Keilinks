@@ -296,14 +296,16 @@ def carregar_exemplos():
 
 
 def exportar_knowledge():
-    """Exporta fatos do MySQL como contexto"""
+    """Exporta fatos do SQLite local como contexto."""
     try:
         from dados.database import get_conn
         conn = get_conn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT pergunta, resposta FROM knowledge ORDER BY acessos DESC LIMIT 50")
-            rows = cur.fetchall()
-        conn.close()
+        try:
+            rows = conn.execute(
+                "SELECT pergunta, resposta FROM knowledge ORDER BY acessos DESC LIMIT 50"
+            ).fetchall()
+        finally:
+            conn.close()
         return '\n'.join([f"- {r['pergunta']}: {r['resposta'][:150]}" for r in rows])
     except Exception:
         return ""

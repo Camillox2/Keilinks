@@ -1,7 +1,7 @@
 """
 Baixa e processa datasets publicos para treino da Keilinks
 Converte tudo pro formato <vitor>...<fim><keilinks>...<fim>
-Tambem salva no MySQL (knowledge) para retrieval
+Também salva no SQLite local (knowledge) para retrieval
 
 Datasets:
   1. Alpaca PT-BR (~52K pares instrucao/resposta)
@@ -79,8 +79,8 @@ def formatar_par(pergunta, resposta):
     return f"<vitor>{p}<fim><keilinks>{r}<fim>"
 
 
-def salvar_no_mysql(pergunta, resposta, fonte, categoria='geral'):
-    """Salva no banco knowledge do MySQL"""
+def salvar_no_sqlite(pergunta, resposta, fonte, categoria='geral'):
+    """Salva no banco SQLite local, sem interromper a coleta."""
     try:
         from dados.database import knowledge_adicionar
         knowledge_adicionar(
@@ -125,7 +125,7 @@ def baixar_alpaca(limite=None):
         return []
 
     pares = []
-    salvos_mysql = 0
+    salvos_sqlite = 0
     total = min(len(ds), limite) if limite else len(ds)
 
     for i, ex in enumerate(ds):
@@ -146,15 +146,15 @@ def baixar_alpaca(limite=None):
         par = formatar_par(pergunta, output)
         if par:
             pares.append(par)
-            # Salva no MySQL a cada 10 (nao sobrecarrega)
+            # Salva no SQLite a cada 10 (não sobrecarrega o disco).
             if len(pares) % 10 == 0:
-                salvar_no_mysql(pergunta[:500], output[:5000], 'alpaca', 'instrucao')
-                salvos_mysql += 1
+                salvar_no_sqlite(pergunta[:500], output[:5000], 'alpaca', 'instrucao')
+                salvos_sqlite += 1
 
         if (i + 1) % 5000 == 0:
-            print(f"  Processados: {i+1}/{total} | Validos: {len(pares)} | MySQL: {salvos_mysql}")
+            print(f"  Processados: {i+1}/{total} | Válidos: {len(pares)} | SQLite: {salvos_sqlite}")
 
-    print(f"  Total: {len(pares)} pares validos | MySQL: {salvos_mysql}")
+    print(f"  Total: {len(pares)} pares válidos | SQLite: {salvos_sqlite}")
     return pares
 
 
@@ -208,7 +208,7 @@ def baixar_dolly(limite=None):
             pares.append(par)
             if len(pares) % 10 == 0:
                 cat = ex.get('category', 'geral')
-                salvar_no_mysql(pergunta[:500], output[:5000], 'dolly', cat)
+                salvar_no_sqlite(pergunta[:500], output[:5000], 'dolly', cat)
 
         if (i + 1) % 5000 == 0:
             print(f"  Processados: {i+1}/{total} | Validos: {len(pares)}")
@@ -272,7 +272,7 @@ def baixar_oasst(limite=None):
         if par:
             pares.append(par)
             if len(pares) % 10 == 0:
-                salvar_no_mysql(pergunta[:500], resposta[:5000], 'oasst', 'conversa')
+                salvar_no_sqlite(pergunta[:500], resposta[:5000], 'oasst', 'conversa')
 
         total_processados += 1
         if total_processados % 5000 == 0:
@@ -333,7 +333,7 @@ def baixar_wiki_pt(limite=None):
         if par:
             pares.append(par)
             if len(pares) % 10 == 0:
-                salvar_no_mysql(pergunta[:500], resumo[:5000], 'wikipedia', 'conhecimento')
+                salvar_no_sqlite(pergunta[:500], resumo[:5000], 'wikipedia', 'conhecimento')
 
         # Segunda variacao: "me fala sobre X"
         if len(paragrafos) > 1 and len(pares) < max_items:
@@ -364,7 +364,7 @@ def main():
 
     print("=" * 60)
     print("  Keilinks — Download de Datasets")
-    print("  Destino: dados/conversas.txt + MySQL knowledge")
+    print("  Destino: dados/conversas.txt + knowledge SQLite")
     print("=" * 60)
 
     todos_pares = []

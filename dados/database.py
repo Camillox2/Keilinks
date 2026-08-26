@@ -1,560 +1,748 @@
+"""Banco local SQLite da Keilinks.
+
+O projeto original dependia de um MySQL local que não fazia parte do
+repositório. Isso transformava o primeiro ``import api.servidor`` em falha
+quando o serviço, a senha ou a porta não existiam. Esta camada usa somente a
+biblioteca padrão do Python, cria a base local sob ``keilinks_data/`` e mantém
+o contrato das funções que o servidor e os importadores já usam.
+
+SQLite é adequado para a instância local/single-user: WAL permite leitores
+enquanto a conversa é gravada e FTS5 fornece busca lexical. Para uma futura
+implantação com várias instâncias, migre explicitamente para PostgreSQL; não
+compartilhe este arquivo SQLite por uma pasta de rede.
 """
-Camada de banco de dados MySQL da Keilinks
-Conexao, tabelas, CRUD para knowledge, conversas, crawler_log, memoria, usuarios e chats.
-"""
+
+from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+import json
 import os
+import re
 import secrets
+import sqlite3
+import threading
 import time
-import pymysql
-from datetime import datetime
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
 
-DB_CONFIG = {
-    'host': os.getenv('KEILINKS_DB_HOST', '127.0.0.1'),
-    'port': int(os.getenv('KEILINKS_DB_PORT', '3309')),
-    'user': os.getenv('KEILINKS_DB_USER', 'root'),
-    'password': os.getenv('KEILINKS_DB_PASSWORD', ''),
-    'database': os.getenv('KEILINKS_DB_NAME', 'keilinks'),
-    'charset': 'utf8mb4',
-    'cursorclass': pymysql.cursors.DictCursor,
-}
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DB_PATH = PROJECT_ROOT / "keilinks_data" / "keilinks.sqlite3"
+_INITIALIZED_PATHS: set[Path] = set()
+_INITIALIZE_LOCK = threading.RLock()
 
 
-def get_conn():
-    if not DB_CONFIG['password'] and os.getenv('KEILINKS_ALLOW_EMPTY_DB_PASSWORD') != '1':
-        raise RuntimeError(
-            'Defina KEILINKS_DB_PASSWORD; vazio só é permitido explicitamente em desenvolvimento local.'
+def database_path() -> Path:
+    """Retorna o caminho da base local, com override explícito para testes."""
+
+    value = os.getenv("KEILINKS_DB_PATH", str(DEFAULT_DB_PATH)).strip()
+    return Path(value).expanduser().resolve()
+
+
+def _connect_raw(path: Path) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
+    try:
+        connection.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.DatabaseError:
+        # O banco ainda funciona em rollback journal quando o filesystem não
+        # permite WAL. Não escondemos outros erros de consulta/escrita.
+        pass
+    return connection
+
+
+def _create_schema(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pergunta TEXT NOT NULL,
+            resposta TEXT NOT NULL,
+            fonte TEXT NOT NULL DEFAULT 'web',
+            categoria TEXT NOT NULL DEFAULT 'geral',
+            url TEXT,
+            relevancia INTEGER NOT NULL DEFAULT 0,
+            acessos INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_pergunta ON knowledge(pergunta);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_fonte ON knowledge(fonte);
+
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            senha_hash TEXT NOT NULL,
+            nome TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS chats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            titulo TEXT NOT NULL DEFAULT 'Nova conversa',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_chats_usuario_atualizado
+            ON chats(usuario_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS conversas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pergunta TEXT NOT NULL,
+            resposta TEXT NOT NULL,
+            fonte TEXT NOT NULL DEFAULT 'desconhecido',
+            chat_id INTEGER,
+            usuario_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_conversas_chat ON conversas(chat_id, id);
+
+        CREATE TABLE IF NOT EXISTS crawler_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fonte TEXT NOT NULL,
+            topico TEXT,
+            sucesso INTEGER NOT NULL DEFAULT 1,
+            fatos_novos INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS memoria (
+            chave TEXT PRIMARY KEY,
+            valor TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        connection.executescript(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+                pergunta,
+                resposta,
+                content='knowledge',
+                content_rowid='id',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            CREATE TRIGGER IF NOT EXISTS knowledge_ai AFTER INSERT ON knowledge BEGIN
+                INSERT INTO knowledge_fts(rowid, pergunta, resposta)
+                VALUES (new.id, new.pergunta, new.resposta);
+            END;
+            CREATE TRIGGER IF NOT EXISTS knowledge_ad AFTER DELETE ON knowledge BEGIN
+                INSERT INTO knowledge_fts(knowledge_fts, rowid, pergunta, resposta)
+                VALUES ('delete', old.id, old.pergunta, old.resposta);
+            END;
+            CREATE TRIGGER IF NOT EXISTS knowledge_au
+            AFTER UPDATE OF pergunta, resposta ON knowledge BEGIN
+                INSERT INTO knowledge_fts(knowledge_fts, rowid, pergunta, resposta)
+                VALUES ('delete', old.id, old.pergunta, old.resposta);
+                INSERT INTO knowledge_fts(rowid, pergunta, resposta)
+                VALUES (new.id, new.pergunta, new.resposta);
+            END;
+            """
         )
-    return pymysql.connect(**DB_CONFIG)
+        connection.execute(
+            "INSERT INTO knowledge_fts(rowid, pergunta, resposta) "
+            "SELECT id, pergunta, resposta FROM knowledge "
+            "WHERE id NOT IN (SELECT rowid FROM knowledge_fts)"
+        )
+    except sqlite3.OperationalError:
+        # FTS5 pode não estar compilado no Python de uma distribuição minimal.
+        # ``knowledge_buscar`` usa LIKE como fallback seguro.
+        pass
 
 
-def inicializar_banco():
-    cfg = DB_CONFIG.copy()
-    db_name = cfg.pop('database')
-    cfg.pop('cursorclass')
+def _ensure_initialized() -> Path:
+    path = database_path()
+    with _INITIALIZE_LOCK:
+        if path in _INITIALIZED_PATHS and path.exists():
+            return path
+        connection = _connect_raw(path)
+        try:
+            _create_schema(connection)
+            connection.commit()
+        finally:
+            connection.close()
+        _INITIALIZED_PATHS.add(path)
+    return path
 
-    conn = pymysql.connect(**cfg)
+
+def get_conn() -> sqlite3.Connection:
+    """Abre uma conexão SQLite pronta para uso, com linhas indexáveis por nome."""
+
+    return _connect_raw(_ensure_initialized())
+
+
+@contextmanager
+def _connection_scope() -> Any:
+    """Abre, confirma/retrocede e fecha a conexão em toda operação local."""
+
+    connection = get_conn()
     try:
-        with conn.cursor() as cur:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-        conn.commit()
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
     finally:
-        conn.close()
-
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS knowledge (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    pergunta VARCHAR(500) NOT NULL,
-                    resposta TEXT NOT NULL,
-                    fonte VARCHAR(50) DEFAULT 'web',
-                    categoria VARCHAR(50) DEFAULT 'geral',
-                    url VARCHAR(500) DEFAULT NULL,
-                    relevancia INT DEFAULT 0,
-                    acessos INT DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FULLTEXT idx_busca (pergunta, resposta)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS conversas (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    pergunta TEXT NOT NULL,
-                    resposta TEXT NOT NULL,
-                    fonte VARCHAR(50) DEFAULT 'desconhecido',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS crawler_log (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    fonte VARCHAR(50) NOT NULL,
-                    topico VARCHAR(200) DEFAULT NULL,
-                    sucesso TINYINT(1) DEFAULT 1,
-                    fatos_novos INT DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS memoria (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    chave VARCHAR(100) UNIQUE NOT NULL,
-                    valor TEXT,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS usuarios (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    username VARCHAR(50) UNIQUE NOT NULL,
-                    senha_hash VARCHAR(255) NOT NULL,
-                    nome VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS chats (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    usuario_id INT NOT NULL,
-                    titulo VARCHAR(200) DEFAULT 'Nova conversa',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-            try:
-                cur.execute("ALTER TABLE conversas ADD COLUMN chat_id INT DEFAULT NULL")
-            except pymysql.err.OperationalError:
-                pass 
-            try:
-                cur.execute("ALTER TABLE conversas ADD COLUMN usuario_id INT DEFAULT NULL")
-            except pymysql.err.OperationalError:
-                pass
-        conn.commit()
-        print("[MySQL] Banco e tabelas prontos")
-    finally:
-        conn.close()
+        connection.close()
 
 
-def knowledge_adicionar(pergunta: str, resposta: str, fonte: str = 'web',
-                        categoria: str = 'geral', url: str = None, relevancia: int = 0):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM knowledge WHERE pergunta = %s LIMIT 1",
-                (pergunta[:500],)
+def inicializar_banco() -> None:
+    """Cria o banco local e todas as tabelas caso ainda não existam."""
+
+    print(f"[SQLite] Banco local pronto: {_ensure_initialized()}")
+
+
+def _iso_timestamp(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if "T" not in value and " " in value:
+        return value.replace(" ", "T", 1) + ("" if value.endswith("Z") else "Z")
+    return value
+
+
+def _row_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    result = dict(row)
+    for key in ("created_at", "updated_at"):
+        if key in result:
+            result[key] = _iso_timestamp(result[key])
+    return result
+
+
+def _knowledge_insert(
+    connection: sqlite3.Connection,
+    pergunta: str,
+    resposta: str,
+    fonte: str = "web",
+    categoria: str = "geral",
+    url: str | None = None,
+    relevancia: int = 0,
+) -> bool:
+    question = str(pergunta or "").strip()[:500]
+    answer = str(resposta or "").strip()
+    if not question or not answer:
+        return False
+    if connection.execute(
+        "SELECT id FROM knowledge WHERE pergunta = ? LIMIT 1", (question,)
+    ).fetchone():
+        return False
+    answer_start = answer[:200]
+    if answer_start and connection.execute(
+        "SELECT id FROM knowledge WHERE substr(resposta, 1, 200) = ? LIMIT 1",
+        (answer_start,),
+    ).fetchone():
+        return False
+    connection.execute(
+        """
+        INSERT INTO knowledge (pergunta, resposta, fonte, categoria, url, relevancia)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            question,
+            answer,
+            str(fonte or "web")[:80],
+            str(categoria or "geral")[:80],
+            str(url)[:2048] if url else None,
+            int(relevancia),
+        ),
+    )
+    return True
+
+
+def knowledge_adicionar(
+    pergunta: str,
+    resposta: str,
+    fonte: str = "web",
+    categoria: str = "geral",
+    url: str | None = None,
+    relevancia: int = 0,
+) -> bool:
+    with _connection_scope() as connection:
+        return _knowledge_insert(
+            connection, pergunta, resposta, fonte, categoria, url, relevancia
+        )
+
+
+def _search_terms(question: str) -> list[str]:
+    return re.findall(r"[0-9A-Za-zÀ-ÿ_]{2,}", question.lower())[:12]
+
+
+def _search_knowledge_fts(
+    connection: sqlite3.Connection, terms: list[str], limit: int
+) -> list[sqlite3.Row]:
+    if not terms:
+        return []
+    query = " OR ".join(f'"{term}"' for term in terms)
+    return connection.execute(
+        """
+        SELECT knowledge.id, knowledge.pergunta, knowledge.resposta,
+               knowledge.fonte, knowledge.url
+        FROM knowledge_fts
+        JOIN knowledge ON knowledge.id = knowledge_fts.rowid
+        WHERE knowledge_fts MATCH ?
+        ORDER BY bm25(knowledge_fts), knowledge.relevancia DESC, knowledge.acessos DESC
+        LIMIT ?
+        """,
+        (query, limit),
+    ).fetchall()
+
+
+def _search_knowledge_like(
+    connection: sqlite3.Connection, terms: list[str], limit: int
+) -> list[sqlite3.Row]:
+    if not terms:
+        return []
+    clauses: list[str] = []
+    params: list[str | int] = []
+    for term in terms:
+        like = f"%{term}%"
+        clauses.append("(lower(pergunta) LIKE ? OR lower(resposta) LIKE ?)")
+        params.extend((like, like))
+    params.append(limit)
+    return connection.execute(
+        "SELECT id, pergunta, resposta, fonte, url FROM knowledge "
+        f"WHERE {' OR '.join(clauses)} "
+        "ORDER BY relevancia DESC, acessos DESC, id DESC LIMIT ?",
+        params,
+    ).fetchall()
+
+
+def knowledge_buscar(pergunta: str, limite: int = 1) -> list[dict[str, Any]]:
+    terms = _search_terms(str(pergunta or ""))
+    if not terms:
+        return []
+    maximum = max(1, min(int(limite), 20))
+    with _connection_scope() as connection:
+        try:
+            rows = _search_knowledge_fts(connection, terms, maximum)
+        except sqlite3.OperationalError:
+            rows = []
+        if not rows:
+            rows = _search_knowledge_like(connection, terms, maximum)
+        ids = [int(row["id"]) for row in rows]
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            connection.execute(
+                f"UPDATE knowledge SET acessos = acessos + 1 WHERE id IN ({placeholders})",
+                ids,
             )
-            if cur.fetchone():
-                return
-
-            resp_inicio = resposta[:200] if resposta else ''
-            if resp_inicio:
-                cur.execute(
-                    "SELECT id FROM knowledge WHERE LEFT(resposta, 200) = %s LIMIT 1",
-                    (resp_inicio,)
-                )
-                if cur.fetchone():
-                    return
-
-            cur.execute(
-                "INSERT INTO knowledge (pergunta, resposta, fonte, categoria, url, relevancia) VALUES (%s, %s, %s, %s, %s, %s)",
-                (pergunta[:500], resposta, fonte, categoria, url, relevancia)
-            )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def knowledge_buscar(pergunta: str, limite: int = 1):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT pergunta, resposta, fonte, id FROM knowledge WHERE MATCH(pergunta, resposta) AGAINST(%s IN NATURAL LANGUAGE MODE) LIMIT %s",
-                (pergunta, limite)
-            )
-            resultados = cur.fetchall()
-            if resultados:
-                cur.execute("UPDATE knowledge SET acessos = acessos + 1 WHERE id = %s", (resultados[0]['id'],))
-                conn.commit()
-            return resultados
-    finally:
-        conn.close()
+        return [_row_dict(row) for row in rows if row is not None]
 
 
 def knowledge_existe(pergunta: str) -> bool:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM knowledge WHERE pergunta = %s LIMIT 1",
-                (pergunta[:500],)
-            )
-            return cur.fetchone() is not None
-    finally:
-        conn.close()
+    with _connection_scope() as connection:
+        return bool(
+            connection.execute(
+                "SELECT id FROM knowledge WHERE pergunta = ? LIMIT 1",
+                (str(pergunta or "").strip()[:500],),
+            ).fetchone()
+        )
 
 
 def knowledge_total() -> int:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS total FROM knowledge")
-            return cur.fetchone()['total']
-    finally:
-        conn.close()
+    with _connection_scope() as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM knowledge").fetchone()[0])
 
 
-def knowledge_por_fonte() -> dict:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT fonte, COUNT(*) AS total FROM knowledge GROUP BY fonte")
-            return {r['fonte']: r['total'] for r in cur.fetchall()}
-    finally:
-        conn.close()
+def knowledge_por_fonte() -> dict[str, int]:
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            "SELECT fonte, COUNT(*) AS total FROM knowledge GROUP BY fonte"
+        ).fetchall()
+    return {str(row["fonte"]): int(row["total"]) for row in rows}
 
 
-def conversa_salvar(pergunta: str, resposta: str, fonte: str = 'desconhecido',
-                    chat_id: int = None, usuario_id: int = None):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO conversas (pergunta, resposta, fonte, chat_id, usuario_id) VALUES (%s, %s, %s, %s, %s)",
-                (pergunta, resposta, fonte, chat_id, usuario_id)
+def conversa_salvar(
+    pergunta: str,
+    resposta: str,
+    fonte: str = "desconhecido",
+    chat_id: int | None = None,
+    usuario_id: int | None = None,
+) -> None:
+    with _connection_scope() as connection:
+        connection.execute(
+            """
+            INSERT INTO conversas (pergunta, resposta, fonte, chat_id, usuario_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (str(pergunta), str(resposta), str(fonte)[:80], chat_id, usuario_id),
+        )
+        if chat_id is not None:
+            connection.execute(
+                "UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (chat_id,),
             )
-        conn.commit()
-        if chat_id:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE chats SET updated_at = NOW() WHERE id = %s", (chat_id,))
-            conn.commit()
-    finally:
-        conn.close()
 
 
-def conversa_historico(limite: int = 50) -> list:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT pergunta, resposta, fonte, created_at FROM conversas ORDER BY id DESC LIMIT %s",
-                (limite,)
-            )
-            rows = cur.fetchall()
-            for r in rows:
-                if isinstance(r['created_at'], datetime):
-                    r['created_at'] = r['created_at'].isoformat()
-                r['data'] = r.pop('created_at')
-            return list(reversed(rows))
-    finally:
-        conn.close()
+def conversa_historico(limite: int = 50) -> list[dict[str, Any]]:
+    maximum = max(1, min(int(limite), 500))
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT pergunta, resposta, fonte, created_at
+            FROM conversas ORDER BY id DESC LIMIT ?
+            """,
+            (maximum,),
+        ).fetchall()
+    history = []
+    for row in reversed(rows):
+        item = _row_dict(row) or {}
+        item["data"] = item.pop("created_at", None)
+        history.append(item)
+    return history
 
 
-def crawler_log_salvar(fonte: str, topico: str = None, sucesso: bool = True, fatos_novos: int = 0):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO crawler_log (fonte, topico, sucesso, fatos_novos) VALUES (%s, %s, %s, %s)",
-                (fonte, topico, sucesso, fatos_novos)
-            )
-        conn.commit()
-    finally:
-        conn.close()
+def crawler_log_salvar(
+    fonte: str,
+    topico: str | None = None,
+    sucesso: bool = True,
+    fatos_novos: int = 0,
+) -> None:
+    with _connection_scope() as connection:
+        connection.execute(
+            "INSERT INTO crawler_log (fonte, topico, sucesso, fatos_novos) VALUES (?, ?, ?, ?)",
+            (
+                str(fonte)[:80],
+                str(topico)[:500] if topico else None,
+                int(bool(sucesso)),
+                int(fatos_novos),
+            ),
+        )
 
 
-def crawler_log_recentes(limite: int = 20) -> list:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT fonte, topico, sucesso, fatos_novos, created_at FROM crawler_log ORDER BY id DESC LIMIT %s",
-                (limite,)
-            )
-            rows = cur.fetchall()
-            for r in rows:
-                if isinstance(r['created_at'], datetime):
-                    r['created_at'] = r['created_at'].isoformat()
-            return list(reversed(rows))
-    finally:
-        conn.close()
+def crawler_log_recentes(limite: int = 20) -> list[dict[str, Any]]:
+    maximum = max(1, min(int(limite), 200))
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT fonte, topico, sucesso, fatos_novos, created_at
+            FROM crawler_log ORDER BY id DESC LIMIT ?
+            """,
+            (maximum,),
+        ).fetchall()
+    return [_row_dict(row) for row in reversed(rows) if row is not None]
 
 
-def memoria_get(chave: str, default=None):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT valor FROM memoria WHERE chave = %s", (chave,))
-            row = cur.fetchone()
-            return row['valor'] if row else default
-    finally:
-        conn.close()
+def memoria_get(chave: str, default: Any = None) -> Any:
+    with _connection_scope() as connection:
+        row = connection.execute(
+            "SELECT valor FROM memoria WHERE chave = ?", (str(chave)[:100],)
+        ).fetchone()
+    return row["valor"] if row else default
 
 
-def memoria_set(chave: str, valor: str):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO memoria (chave, valor) VALUES (%s, %s) ON DUPLICATE KEY UPDATE valor = %s",
-                (chave, valor, valor)
-            )
-        conn.commit()
-    finally:
-        conn.close()
+def memoria_set(chave: str, valor: str) -> None:
+    with _connection_scope() as connection:
+        connection.execute(
+            """
+            INSERT INTO memoria (chave, valor, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(chave) DO UPDATE SET
+                valor = excluded.valor,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (str(chave)[:100], str(valor)),
+        )
 
 
-def memoria_todos() -> dict:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT chave, valor FROM memoria")
-            return {r['chave']: r['valor'] for r in cur.fetchall()}
-    finally:
-        conn.close()
+def memoria_todos() -> dict[str, str]:
+    with _connection_scope() as connection:
+        rows = connection.execute("SELECT chave, valor FROM memoria").fetchall()
+    return {str(row["chave"]): str(row["valor"] or "") for row in rows}
+
+
+def _auth_secret_path() -> Path:
+    return database_path().with_suffix(".auth_secret")
 
 
 def _auth_secret() -> bytes:
-    secret = os.getenv('KEILINKS_AUTH_SECRET', '')
-    if len(secret) < 32:
-        raise RuntimeError('KEILINKS_AUTH_SECRET precisa ter no mínimo 32 caracteres.')
-    return secret.encode('utf-8')
+    configured = os.getenv("KEILINKS_AUTH_SECRET", "").strip()
+    if configured:
+        if len(configured) < 32:
+            raise RuntimeError("KEILINKS_AUTH_SECRET precisa ter no mínimo 32 caracteres.")
+        return configured.encode("utf-8")
+
+    # Uma instalação local sem .env continua funcional. O segredo persiste fora
+    # do Git, ao lado do banco, para que tokens sobrevivam ao restart.
+    path = _auth_secret_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        value = ""
+    if len(value) < 32:
+        value = secrets.token_urlsafe(48)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(value + "\n", encoding="utf-8")
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    return value.encode("utf-8")
+
 
 def _hash_senha(senha: str) -> str:
     if not senha:
-        raise ValueError('senha não pode estar vazia')
+        raise ValueError("senha não pode estar vazia")
     salt = secrets.token_bytes(16)
-    derived = hashlib.scrypt(senha.encode('utf-8'), salt=salt, n=2**14, r=8, p=1)
-    return 'scrypt$16384$8$1$' + base64.b64encode(salt).decode('ascii') + '$' + base64.b64encode(derived).decode('ascii')
+    derived = hashlib.scrypt(senha.encode("utf-8"), salt=salt, n=2**14, r=8, p=1)
+    return (
+        "scrypt$16384$8$1$"
+        + base64.b64encode(salt).decode("ascii")
+        + "$"
+        + base64.b64encode(derived).decode("ascii")
+    )
 
 
 def _verificar_senha(senha: str, armazenada: str) -> tuple[bool, bool]:
-    if armazenada.startswith('scrypt$'):
+    if armazenada.startswith("scrypt$"):
         try:
-            _, n, r, p, salt_b64, hash_b64 = armazenada.split('$', 6)
+            _, n, r, p, salt_b64, hash_b64 = armazenada.split("$", 6)
             salt = base64.b64decode(salt_b64)
             expected = base64.b64decode(hash_b64)
             actual = hashlib.scrypt(
-                senha.encode('utf-8'), salt=salt, n=int(n), r=int(r), p=int(p)
+                senha.encode("utf-8"), salt=salt, n=int(n), r=int(r), p=int(p)
             )
             return hmac.compare_digest(actual, expected), False
         except (ValueError, TypeError):
             return False, False
-    legacy = hashlib.sha256(senha.encode('utf-8')).hexdigest()
+    legacy = hashlib.sha256(senha.encode("utf-8")).hexdigest()
     return hmac.compare_digest(legacy, armazenada), True
+
 
 def _gerar_token(username: str) -> str:
     issued_at = str(int(time.time()))
     payload = f"{username}:{issued_at}"
-    signature = hmac.new(_auth_secret(), payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    signature = hmac.new(_auth_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{payload}:{signature}"
 
 
-def usuario_criar(username: str, senha: str, nome: str = None) -> dict | None:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM usuarios WHERE username = %s", (username,))
-            if cur.fetchone():
-                return None
-            senha_hash = _hash_senha(senha)
-            cur.execute(
-                "INSERT INTO usuarios (username, senha_hash, nome) VALUES (%s, %s, %s)",
-                (username, senha_hash, nome or username)
+def _normalizar_username(username: str) -> str:
+    value = str(username or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{3,50}", value):
+        raise ValueError("username deve ter 3-50 caracteres: letras, números, _, . ou -")
+    return value
+
+
+def usuario_criar(username: str, senha: str, nome: str | None = None) -> dict[str, Any] | None:
+    username = _normalizar_username(username)
+    with _connection_scope() as connection:
+        try:
+            cursor = connection.execute(
+                "INSERT INTO usuarios (username, senha_hash, nome) VALUES (?, ?, ?)",
+                (username, _hash_senha(senha), str(nome or username)[:100]),
             )
-        conn.commit()
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, username, nome FROM usuarios WHERE username = %s", (username,))
-            user = cur.fetchone()
-        user['token'] = _gerar_token(username)
-        return user
-    finally:
-        conn.close()
+        except sqlite3.IntegrityError:
+            return None
+        row = connection.execute(
+            "SELECT id, username, nome FROM usuarios WHERE id = ?", (cursor.lastrowid,)
+        ).fetchone()
+    user = _row_dict(row) or {}
+    user["token"] = _gerar_token(username)
+    return user
 
 
-def usuario_login(username: str, senha: str) -> dict | None:
-    conn = get_conn()
+def usuario_login(username: str, senha: str) -> dict[str, Any] | None:
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, username, nome, senha_hash FROM usuarios WHERE username = %s",
-                (username,)
+        username = _normalizar_username(username)
+    except ValueError:
+        return None
+    with _connection_scope() as connection:
+        row = connection.execute(
+            "SELECT id, username, nome, senha_hash FROM usuarios WHERE username = ?",
+            (username,),
+        ).fetchone()
+        if row is None:
+            return None
+        valid, needs_migration = _verificar_senha(senha, str(row["senha_hash"]))
+        if not valid:
+            return None
+        if needs_migration:
+            connection.execute(
+                "UPDATE usuarios SET senha_hash = ? WHERE id = ?",
+                (_hash_senha(senha), int(row["id"])),
             )
-            user = cur.fetchone()
-            if not user:
-                return None
-            valid, precisa_migrar = _verificar_senha(senha, user['senha_hash'])
-            if not valid:
-                return None
-            if precisa_migrar:
-                cur.execute(
-                    "UPDATE usuarios SET senha_hash = %s WHERE id = %s",
-                    (_hash_senha(senha), user['id'])
-                )
-                conn.commit()
-            del user['senha_hash']
-            user['token'] = _gerar_token(username)
-            return user
-    finally:
-        conn.close()
+    user = {"id": int(row["id"]), "username": str(row["username"]), "nome": row["nome"]}
+    user["token"] = _gerar_token(user["username"])
+    return user
 
 
-def usuario_por_token(token: str) -> dict | None:
+def usuario_por_token(token: str) -> dict[str, Any] | None:
     if not token:
         return None
     try:
-        username, issued_at, signature = token.rsplit(':', 2)
+        username, issued_at, signature = token.rsplit(":", 2)
         issued_at_int = int(issued_at)
     except (TypeError, ValueError):
         return None
-
-    ttl_seconds = int(os.getenv('KEILINKS_AUTH_TOKEN_TTL_SECONDS', str(7 * 24 * 60 * 60)))
+    ttl_seconds = int(
+        os.getenv("KEILINKS_AUTH_TOKEN_TTL_SECONDS", str(7 * 24 * 60 * 60))
+    )
     now = int(time.time())
-    if not username or ttl_seconds <= 0 or issued_at_int > now + 60 or now - issued_at_int > ttl_seconds:
+    if (
+        not username
+        or ttl_seconds <= 0
+        or issued_at_int > now + 60
+        or now - issued_at_int > ttl_seconds
+    ):
         return None
-
-    payload = f"{username}:{issued_at}"
     expected = hmac.new(
-        _auth_secret(), payload.encode('utf-8'), hashlib.sha256
+        _auth_secret(), f"{username}:{issued_at}".encode(), hashlib.sha256
     ).hexdigest()
     if not hmac.compare_digest(signature, expected):
         return None
-    
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, username, nome FROM usuarios WHERE username = %s", (username,))
-            user = cur.fetchone()
-            if user:
-                return user
-        return None
-    finally:
-        conn.close()
+    with _connection_scope() as connection:
+        row = connection.execute(
+            "SELECT id, username, nome FROM usuarios WHERE username = ?", (username,)
+        ).fetchone()
+    return _row_dict(row)
 
 
-def chat_criar(usuario_id: int, titulo: str = 'Nova conversa') -> dict:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO chats (usuario_id, titulo) VALUES (%s, %s)",
-                (usuario_id, titulo)
-            )
-            chat_id = cur.lastrowid
-        conn.commit()
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM chats WHERE id = %s", (chat_id,))
-            row = cur.fetchone()
-            for k in ('created_at', 'updated_at'):
-                if isinstance(row.get(k), datetime):
-                    row[k] = row[k].isoformat()
-            return row
-    finally:
-        conn.close()
+def chat_criar(usuario_id: int, titulo: str = "Nova conversa") -> dict[str, Any]:
+    with _connection_scope() as connection:
+        cursor = connection.execute(
+            "INSERT INTO chats (usuario_id, titulo) VALUES (?, ?)",
+            (int(usuario_id), str(titulo or "Nova conversa")[:200]),
+        )
+        row = connection.execute("SELECT * FROM chats WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return _row_dict(row) or {}
 
 
-def chat_listar(usuario_id: int) -> list:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, titulo, created_at, updated_at FROM chats WHERE usuario_id = %s ORDER BY updated_at DESC",
-                (usuario_id,)
-            )
-            rows = cur.fetchall()
-            for r in rows:
-                for k in ('created_at', 'updated_at'):
-                    if isinstance(r.get(k), datetime):
-                        r[k] = r[k].isoformat()
-            return rows
-    finally:
-        conn.close()
+def chat_listar(usuario_id: int) -> list[dict[str, Any]]:
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, titulo, created_at, updated_at FROM chats
+            WHERE usuario_id = ? ORDER BY updated_at DESC, id DESC
+            """,
+            (int(usuario_id),),
+        ).fetchall()
+    return [_row_dict(row) for row in rows if row is not None]
 
 
-def chat_mensagens(chat_id: int, usuario_id: int) -> list | None:
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM chats WHERE id = %s AND usuario_id = %s", (chat_id, usuario_id))
-            if not cur.fetchone():
-                return None
-            cur.execute(
-                "SELECT pergunta, resposta, fonte, created_at FROM conversas WHERE chat_id = %s ORDER BY id ASC",
-                (chat_id,)
-            )
-            rows = cur.fetchall()
-            for r in rows:
-                if isinstance(r.get('created_at'), datetime):
-                    r['created_at'] = r['created_at'].isoformat()
-            return rows
-    finally:
-        conn.close()
+def chat_mensagens(chat_id: int, usuario_id: int) -> list[dict[str, Any]] | None:
+    with _connection_scope() as connection:
+        owner = connection.execute(
+            "SELECT id FROM chats WHERE id = ? AND usuario_id = ?",
+            (int(chat_id), int(usuario_id)),
+        ).fetchone()
+        if owner is None:
+            return None
+        rows = connection.execute(
+            """
+            SELECT pergunta, resposta, fonte, created_at FROM conversas
+            WHERE chat_id = ? ORDER BY id ASC
+            """,
+            (int(chat_id),),
+        ).fetchall()
+    return [_row_dict(row) for row in rows if row is not None]
 
 
 def chat_deletar(chat_id: int, usuario_id: int) -> bool:
-    conn = get_conn()
+    with _connection_scope() as connection:
+        owner = connection.execute(
+            "SELECT id FROM chats WHERE id = ? AND usuario_id = ?",
+            (int(chat_id), int(usuario_id)),
+        ).fetchone()
+        if owner is None:
+            return False
+        connection.execute("DELETE FROM conversas WHERE chat_id = ?", (int(chat_id),))
+        connection.execute("DELETE FROM chats WHERE id = ?", (int(chat_id),))
+    return True
+
+
+def chat_atualizar_titulo(chat_id: int, titulo: str) -> None:
+    with _connection_scope() as connection:
+        connection.execute(
+            "UPDATE chats SET titulo = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (str(titulo or "Nova conversa")[:200], int(chat_id)),
+        )
+
+
+def _read_json(path: Path, fallback: Any) -> Any:
+    if not path.exists():
+        return fallback
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id FROM chats WHERE id = %s AND usuario_id = %s", (chat_id, usuario_id))
-            if not cur.fetchone():
-                return False
-            cur.execute("DELETE FROM conversas WHERE chat_id = %s", (chat_id,))
-            cur.execute("DELETE FROM chats WHERE id = %s", (chat_id,))
-        conn.commit()
-        return True
-    finally:
-        conn.close()
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return fallback
 
 
-def chat_atualizar_titulo(chat_id: int, titulo: str):
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE chats SET titulo = %s WHERE id = %s", (titulo[:200], chat_id))
-        conn.commit()
-    finally:
-        conn.close()
+def migrar_json_para_sqlite(base_dir: str | Path) -> dict[str, int]:
+    """Importa JSONs legados uma única vez sem sobrescrever dados locais."""
+
+    root = Path(base_dir)
+    imported = {"knowledge": 0, "conversas": 0, "memoria": 0}
+    facts = _read_json(root / "dados" / "knowledge.json", [])
+    history = _read_json(root / "dados" / "historico.json", [])
+    memory = _read_json(root / "dados" / "memoria.json", {})
+    with _connection_scope() as connection:
+        if isinstance(facts, list):
+            for fact in facts:
+                if isinstance(fact, dict) and _knowledge_insert(
+                    connection,
+                    str(fact.get("pergunta", "")),
+                    str(fact.get("resposta", "")),
+                    str(fact.get("fonte", "web")),
+                    str(fact.get("categoria", "geral")),
+                    fact.get("url"),
+                ):
+                    imported["knowledge"] += 1
+        if isinstance(history, list):
+            for item in history:
+                if not isinstance(item, dict):
+                    continue
+                question = str(item.get("pergunta", "")).strip()
+                answer = str(item.get("resposta", "")).strip()
+                if question and answer:
+                    connection.execute(
+                        "INSERT INTO conversas (pergunta, resposta, fonte) VALUES (?, ?, ?)",
+                        (question, answer, str(item.get("fonte", "desconhecido"))[:80]),
+                    )
+                    imported["conversas"] += 1
+        if isinstance(memory, dict):
+            for key, value in memory.items():
+                serialized = (
+                    json.dumps(value, ensure_ascii=False)
+                    if isinstance(value, (list, dict))
+                    else str(value)
+                )
+                connection.execute(
+                    """
+                    INSERT INTO memoria (chave, valor, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (str(key)[:100], serialized),
+                )
+                imported["memoria"] += 1
+    return imported
 
 
-def migrar_json_para_mysql(base_dir: str):
-    import json
-    knowledge_path = os.path.join(base_dir, 'dados', 'knowledge.json')
-    if os.path.exists(knowledge_path):
-        with open(knowledge_path, 'r', encoding='utf-8') as f:
-            try: fatos = json.load(f)
-            except (json.JSONDecodeError, ValueError): fatos = []
-        if fatos:
-            conn = get_conn()
-            try:
-                with conn.cursor() as cur:
-                    for fato in fatos:
-                        cur.execute(
-                            "INSERT INTO knowledge (pergunta, resposta, fonte, url) VALUES (%s, %s, %s, %s)",
-                            (fato.get('pergunta', '')[:500], fato.get('resposta', ''), fato.get('fonte', 'web')[:50], fato.get('url', None))
-                        )
-                conn.commit()
-            finally: conn.close()
+def migrar_json_para_mysql(base_dir: str | Path) -> dict[str, int]:
+    """Alias temporário para scripts antigos; não abre nem exige MySQL."""
 
-    historico_path = os.path.join(base_dir, 'dados', 'historico.json')
-    if os.path.exists(historico_path):
-        with open(historico_path, 'r', encoding='utf-8') as f:
-            try: historico = json.load(f)
-            except: historico = []
-        if historico:
-            conn = get_conn()
-            try:
-                with conn.cursor() as cur:
-                    for h in historico:
-                        cur.execute(
-                            "INSERT INTO conversas (pergunta, resposta, fonte) VALUES (%s, %s, %s)",
-                            (h.get('pergunta', ''), h.get('resposta', ''), h.get('fonte', 'desconhecido'))
-                        )
-                conn.commit()
-            finally: conn.close()
-
-    memoria_path = os.path.join(base_dir, 'dados', 'memoria.json')
-    if os.path.exists(memoria_path):
-        with open(memoria_path, 'r', encoding='utf-8') as f:
-            try: dados = json.load(f)
-            except: dados = {}
-        if dados:
-            for chave, valor in dados.items():
-                if isinstance(valor, (list, dict)):
-                    import json as j
-                    memoria_set(chave, j.dumps(valor, ensure_ascii=False))
-                else: memoria_set(chave, str(valor))
+    return migrar_json_para_sqlite(base_dir)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import sys
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
     inicializar_banco()
-    if '--migrar' in sys.argv:
-        migrar_json_para_mysql(base)
+    if "--migrar" in sys.argv:
+        print(migrar_json_para_sqlite(PROJECT_ROOT))
