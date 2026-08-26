@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from api import servidor_v4
 from dados import database
+from treino.v4.exportar_feedback_consentido import export_approved_feedback
 
 
 class TestUserMemoryV4(unittest.TestCase):
@@ -114,12 +115,84 @@ class TestUserMemoryV4(unittest.TestCase):
         self.assertEqual(protected.status_code, 200)
         self.assertIn("profile", protected.get_json())
 
+    def test_feedback_requires_consent_then_waits_for_review(self) -> None:
+        user = self._register("feedback.mem", "Feedback")
+        payload = {
+            "prompt": "Meu email é pessoa@example.com; explique como funciona uma API.",
+            "response": (
+                "Uma API permite que dois sistemas troquem dados por uma interface definida."
+            ),
+            "rating": "up",
+        }
+        blocked = self.client.post(
+            "/api/me/training-feedback", headers=self._headers(user), json=payload
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertTrue(blocked.get_json()["requires_training_consent"])
+
+        enabled = self.client.put(
+            "/api/me/memory/settings",
+            headers=self._headers(user),
+            json={"training_consent": True},
+        )
+        self.assertEqual(enabled.status_code, 200)
+        queued = self.client.post(
+            "/api/me/training-feedback", headers=self._headers(user), json=payload
+        )
+        self.assertEqual(queued.status_code, 201)
+        feedback = queued.get_json()["feedback"]
+        self.assertEqual(feedback["status"], "pending_human_review")
+        self.assertTrue(feedback["redacted"])
+        self.assertNotIn("pessoa@example.com", feedback["prompt"])
+        self.assertEqual(queued.get_json()["summary"]["pending_human_review"], 1)
+
+        reviewed = database.feedback_treino_revisar(feedback["id"], approved=True)
+        self.assertIsNotNone(reviewed)
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = export_approved_feedback(Path(temporary))
+            self.assertEqual(manifest["approved_sft_examples"], 1)
+            self.assertEqual(manifest["approved_preference_pairs"], 0)
+
+        self.client.put(
+            "/api/me/memory/settings",
+            headers=self._headers(user),
+            json={"training_consent": False},
+        )
+        self.assertEqual(database.feedback_treino_aprovados(), [])
+
+    def test_negative_feedback_with_correction_builds_preference_after_review(self) -> None:
+        user = self._register("correction.mem", "Correção")
+        self.client.put(
+            "/api/me/memory/settings",
+            headers=self._headers(user),
+            json={"training_consent": True},
+        )
+        queued = self.client.post(
+            "/api/me/training-feedback",
+            headers=self._headers(user),
+            json={
+                "prompt": "Qual é a capital do Brasil?",
+                "response": "Rio de Janeiro.",
+                "rating": "down",
+                "correction": "A capital do Brasil é Brasília.",
+            },
+        )
+        self.assertEqual(queued.status_code, 201)
+        feedback = queued.get_json()["feedback"]
+        database.feedback_treino_revisar(feedback["id"], approved=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = export_approved_feedback(Path(temporary))
+            self.assertEqual(manifest["approved_sft_examples"], 1)
+            self.assertEqual(manifest["approved_preference_pairs"], 1)
+
     def test_frontend_exposes_explicit_memory_controls(self) -> None:
         interface = (Path(__file__).resolve().parents[1] / "interface" / "index.html")
         source = interface.read_text(encoding="utf-8")
         self.assertIn("Memória e privacidade", source)
         self.assertIn("/api/me/memory/settings", source)
         self.assertIn("/api/me/memories", source)
+        self.assertIn("/api/me/training-feedback", source)
+        self.assertIn("Ativar contribuição", source)
         self.assertIn("automaticamente", source)
 
 

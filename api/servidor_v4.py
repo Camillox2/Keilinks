@@ -26,6 +26,9 @@ from busca.web_v4 import precisa_buscar as precisa_buscar_v4
 from cerebro.raciocinio import normalize_reasoning_mode
 from dados.database import (
     conversa_historico_usuario,
+    feedback_treino_listar_usuario,
+    feedback_treino_registrar,
+    feedback_treino_resumo_usuario,
     memoria_usuario_atualizar,
     memoria_usuario_config,
     memoria_usuario_config_atualizar,
@@ -424,12 +427,15 @@ def _memory_payload(user: dict) -> dict:
         },
         "settings": memoria_usuario_config(user["id"]),
         "memories": memorias_usuario_listar(user["id"]),
+        "training_feedback": feedback_treino_resumo_usuario(user["id"]),
         "policy": {
             "automatic_extraction": False,
-            "training": "opt_in_only; reviewed_offline_only",
+            "training": "opt_in_only; rated; reviewed_offline_only",
             "description": (
                 "A Keilinks usa somente memórias salvas ou confirmadas por você. "
-                "Conversas não alteram os pesos automaticamente."
+                "Avaliações consentidas entram em uma fila com remoção de dados "
+                "sensíveis e revisão antes de um treino futuro; nunca alteram os pesos "
+                "durante uma conversa."
             ),
         },
     }
@@ -473,6 +479,46 @@ def perfil_pessoal_atualizar():
     if profile is None:
         return jsonify({"erro": "Perfil não encontrado"}), 404
     return jsonify({"profile": profile})
+
+
+@legacy.app.route("/api/me/training-feedback", methods=["GET"])
+def feedback_treino_obter():
+    user = _memory_user()
+    if user is None:
+        return jsonify({"erro": "Não autenticado"}), 401
+    return jsonify({
+        "summary": feedback_treino_resumo_usuario(user["id"]),
+        "feedback": feedback_treino_listar_usuario(user["id"], 50),
+        "policy": "consent_required; human_review_required; offline_training_only",
+    })
+
+
+@legacy.app.route("/api/me/training-feedback", methods=["POST"])
+def feedback_treino_enviar():
+    """Recebe um voto explícito; a fila não aciona retreino automaticamente."""
+
+    user = _memory_user()
+    if user is None:
+        return jsonify({"erro": "Não autenticado"}), 401
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        feedback = feedback_treino_registrar(
+            user["id"],
+            payload.get("prompt"),
+            payload.get("response"),
+            payload.get("rating"),
+            correction=payload.get("correction"),
+            chat_id=payload.get("chat_id"),
+        )
+    except PermissionError as exc:
+        return jsonify({"erro": str(exc), "requires_training_consent": True}), 409
+    except ValueError as exc:
+        return jsonify({"erro": str(exc)}), 400
+    return jsonify({
+        "feedback": feedback,
+        "summary": feedback_treino_resumo_usuario(user["id"]),
+        "message": "Avaliação enviada para a fila de revisão.",
+    }), 201
 
 
 @legacy.app.route("/api/me/memories", methods=["POST"])

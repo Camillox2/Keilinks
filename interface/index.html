@@ -517,6 +517,32 @@
     .badge.flash { background: rgba(251,191,36,0.15); color: #fbbf24; }
     .badge.ultra { background: rgba(168,85,247,0.15); color: #c084fc; }
 
+    .response-feedback {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+    }
+    .response-feedback-label { color: var(--muted); font-size: 11px; margin-right: 2px; }
+    .response-feedback button {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 4px 8px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .response-feedback button:hover { color: var(--text); border-color: rgba(168,85,247,0.65); }
+    .response-feedback button.feedback-up.selected { color: #4ade80; border-color: rgba(74,222,128,0.55); background: rgba(74,222,128,0.08); }
+    .response-feedback button.feedback-down.selected { color: #fbbf24; border-color: rgba(251,191,36,0.55); background: rgba(251,191,36,0.08); }
+    .response-feedback button:disabled { opacity: 0.55; cursor: wait; }
+    .response-feedback-status { color: var(--muted); font-size: 11px; }
+
     .reasoning-summary {
       margin-top: 10px;
       border: 1px solid rgba(168,85,247,0.34);
@@ -896,6 +922,21 @@
     .memory-setting strong { display: block; font-size: 13px; font-weight: 500; }
     .memory-setting span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 
+    .training-consent-callout {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 2px 0 8px;
+      padding: 10px;
+      border: 1px solid rgba(168,85,247,0.28);
+      border-radius: 10px;
+      background: rgba(124,58,237,0.07);
+    }
+    .training-consent-callout strong { display: block; font-size: 12px; }
+    .training-consent-callout p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .training-consent-status { min-height: 16px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+
     .memory-feedback { min-height: 18px; color: var(--muted); font-size: 12px; margin-top: 9px; }
     .memory-feedback.error { color: #f87171; }
     .memory-feedback.success { color: #4ade80; }
@@ -1004,6 +1045,8 @@
       .memory-form-row { flex-wrap: wrap; }
       .memory-form-row select { flex: 1; }
       .memory-form-row .memory-input { flex-basis: 100%; }
+      .training-consent-callout { align-items: flex-start; flex-direction: column; }
+      .training-consent-callout .memory-action { width: 100%; }
 
       /* Mensagens usam mais largura */
       .msg { max-width: 92%; }
@@ -1153,8 +1196,16 @@
         </label>
         <label class="memory-setting">
           <input id="training-consent" type="checkbox" />
-          <span><strong>Ajudar a melhorar a Keilinks</strong>Exige revisão, remoção de dados sensíveis e um treino futuro separado; nunca muda o modelo imediatamente.</span>
+          <span><strong>Permitir contribuição com avaliações</strong>Respostas marcadas como boas ou ruins podem entrar numa fila de revisão. O modelo nunca muda durante uma conversa.</span>
         </label>
+        <div class="training-consent-callout">
+          <div>
+            <strong id="training-consent-title">Contribuição para treino desativada</strong>
+            <p id="training-consent-description">Ative para poder avaliar respostas e enviar exemplos para curadoria futura.</p>
+          </div>
+          <button id="training-consent-button" class="memory-action" type="button" onclick="alternarContribuicaoTreino()">Ativar contribuição</button>
+        </div>
+        <div id="training-feedback-summary" class="training-consent-status" aria-live="polite"></div>
         <button class="memory-action secondary" onclick="salvarConfiguracoesMemoria()">Salvar controles</button>
       </section>
 
@@ -1368,11 +1419,12 @@
 
   function renderMemoriaPessoal() {
     if (!memoryData) return;
-    const { profile = {}, settings = {}, memories = [] } = memoryData;
+    const { profile = {}, settings = {}, memories = [], training_feedback: trainingFeedback = {} } = memoryData;
     document.getElementById('memory-profile-name').value = profile.nome || '';
     document.getElementById('memory-enabled').checked = Boolean(settings.memory_enabled);
     document.getElementById('history-enabled').checked = Boolean(settings.history_enabled);
     document.getElementById('training-consent').checked = Boolean(settings.training_consent);
+    renderControleContribuicaoTreino(settings, trainingFeedback);
 
     const categoryLabels = {
       preference: 'Preferência',
@@ -1418,6 +1470,51 @@
     });
   }
 
+  function renderControleContribuicaoTreino(settings = {}, summary = {}) {
+    const enabled = Boolean(settings.training_consent);
+    const button = document.getElementById('training-consent-button');
+    const title = document.getElementById('training-consent-title');
+    const description = document.getElementById('training-consent-description');
+    const status = document.getElementById('training-feedback-summary');
+    button.textContent = enabled ? 'Desativar contribuição' : 'Ativar contribuição';
+    button.classList.toggle('secondary', enabled);
+    title.textContent = enabled
+      ? 'Contribuição para treino ativada'
+      : 'Contribuição para treino desativada';
+    description.textContent = enabled
+      ? 'Suas avaliações entram em uma fila privada, passam por remoção de dados sensíveis e revisão humana antes de qualquer treino futuro.'
+      : 'Ative para poder avaliar respostas e enviar exemplos para curadoria futura.';
+    const pending = Number(summary.pending_human_review || 0);
+    const approved = Number(summary.approved || 0);
+    status.textContent = enabled
+      ? `${pending} avaliação(ões) aguardando revisão; ${approved} aprovada(s).`
+      : 'Desativado: novas avaliações não serão coletadas nem exportadas para treino.';
+  }
+
+  async function alternarContribuicaoTreino() {
+    if (!currentUser) return;
+    const checkbox = document.getElementById('training-consent');
+    const nextValue = !checkbox.checked;
+    if (nextValue && !window.confirm(
+      'Ativar contribuição? Avaliações de respostas poderão ser guardadas em uma fila privada para revisão e treino futuro. Elas não mudam o modelo automaticamente.'
+    )) return;
+    try {
+      const data = await lerResposta(await fetch(`${API}/api/me/memory/settings`, {
+        method: 'PUT',
+        headers: authHeaders(true),
+        body: JSON.stringify({ training_consent: nextValue })
+      }));
+      checkbox.checked = Boolean(data.settings.training_consent);
+      if (memoryData) {
+        memoryData.settings = { ...memoryData.settings, ...data.settings };
+        renderControleContribuicaoTreino(memoryData.settings, memoryData.training_feedback || {});
+      }
+      feedbackMemoria(nextValue ? 'Contribuição para treino ativada.' : 'Contribuição para treino desativada.', 'success');
+    } catch (error) {
+      feedbackMemoria(error.message || 'Não foi possível atualizar a contribuição.', 'error');
+    }
+  }
+
   async function salvarPerfilMemoria() {
     if (!currentUser) return;
     const nome = document.getElementById('memory-profile-name').value.trim();
@@ -1446,7 +1543,10 @@
       const data = await lerResposta(await fetch(`${API}/api/me/memory/settings`, {
         method: 'PUT', headers: authHeaders(true), body: JSON.stringify(body)
       }));
-      if (memoryData) memoryData.settings = data.settings;
+      if (memoryData) {
+        memoryData.settings = data.settings;
+        renderControleContribuicaoTreino(memoryData.settings, memoryData.training_feedback || {});
+      }
       feedbackMemoria('Controles de privacidade salvos.', 'success');
     } catch (error) {
       feedbackMemoria(error.message || 'Não foi possível salvar os controles.', 'error');
@@ -1776,6 +1876,80 @@
     scrollToBottom();
   }
 
+  function adicionarAvaliacaoResposta(msgEl, prompt, response) {
+    if (!currentUser || !msgEl || !prompt || !response) return;
+    const container = document.createElement('div');
+    container.className = 'response-feedback';
+    const label = document.createElement('span');
+    label.className = 'response-feedback-label';
+    label.textContent = 'Esta resposta ajudou?';
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'feedback-up';
+    up.textContent = '👍 Boa';
+    up.setAttribute('aria-pressed', 'false');
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'feedback-down';
+    down.textContent = '👎 Melhorar';
+    down.setAttribute('aria-pressed', 'false');
+    const status = document.createElement('span');
+    status.className = 'response-feedback-status';
+    up.addEventListener('click', () => enviarAvaliacaoResposta({
+      prompt, response, rating: 'up', chatId: currentChatId, up, down, status
+    }));
+    down.addEventListener('click', () => enviarAvaliacaoResposta({
+      prompt, response, rating: 'down', chatId: currentChatId, up, down, status
+    }));
+    container.append(label, up, down, status);
+    msgEl.querySelector('.bubble').appendChild(container);
+  }
+
+  async function enviarAvaliacaoResposta({ prompt, response, rating, chatId, up, down, status }) {
+    let correction = '';
+    if (rating === 'down') {
+      const requested = window.prompt(
+        'O que ficou errado ou como seria uma resposta melhor? (opcional)'
+      );
+      if (requested === null) return;
+      correction = requested.trim();
+    }
+    up.disabled = true;
+    down.disabled = true;
+    status.textContent = 'Enviando avaliação...';
+    try {
+      const res = await fetch(`${API}/api/me/training-feedback`, {
+        method: 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify({ prompt, response, rating, correction, chat_id: chatId })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 409 && data.requires_training_consent) {
+          status.textContent = 'Ative a contribuição em Memória e privacidade para enviar avaliações.';
+          up.disabled = false;
+          down.disabled = false;
+          abrirMemoriaPessoal();
+          return;
+        }
+        throw new Error(data.erro || `Erro ${res.status}`);
+      }
+      if (memoryData) {
+        memoryData.training_feedback = data.summary || memoryData.training_feedback;
+      }
+      const selected = rating === 'up' ? up : down;
+      selected.classList.add('selected');
+      selected.setAttribute('aria-pressed', 'true');
+      status.textContent = data.feedback?.status === 'pending_human_review'
+        ? 'Enviada para revisão.'
+        : 'Recebida, mas retida pelo filtro de qualidade.';
+    } catch (error) {
+      status.textContent = error.message || 'Não foi possível enviar a avaliação.';
+      up.disabled = false;
+      down.disabled = false;
+    }
+  }
+
   let typingTimer = null;
 
   function mostrarDigitando() {
@@ -1909,6 +2083,7 @@
                     bdiv.innerHTML = `<span class="badge ultra">${modeloAtual}</span> ${reasoningBadge}`;
                     bubble.appendChild(bdiv);
                     anexarResumoRaciocinio(msgEl, evt.resumo_raciocinio);
+                    adicionarAvaliacaoResposta(msgEl, texto, textoAcumulado);
                   }
                 }
               } catch {}
@@ -1948,6 +2123,7 @@
             msgEl.querySelector('.bubble').appendChild(bdiv);
           }
           anexarResumoRaciocinio(msgEl, data.resumo_raciocinio);
+          adicionarAvaliacaoResposta(msgEl, texto, data.resposta);
         } else {
           adicionarMsg('Nao consegui processar isso.', 'kei');
         }

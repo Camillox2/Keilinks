@@ -144,6 +144,35 @@ def _create_schema(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_user_memories_user_updated
             ON user_memories(user_id, updated_at DESC, id DESC);
+
+        -- Feedback de treinamento nunca é consumido diretamente pelo runtime.
+        -- Cada item fica em uma fila por usuário, com consentimento registrado,
+        -- validação/remoção de PII e uma revisão explícita antes de exportar.
+        CREATE TABLE IF NOT EXISTS training_feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER,
+            fingerprint TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            response TEXT NOT NULL,
+            rating TEXT NOT NULL CHECK (rating IN ('up', 'down')),
+            correction TEXT,
+            quality_score INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending_human_review',
+            consent_snapshot INTEGER NOT NULL DEFAULT 0,
+            redacted INTEGER NOT NULL DEFAULT 0,
+            review_note TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE,
+            FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE SET NULL,
+            UNIQUE(user_id, fingerprint)
+        );
+        CREATE INDEX IF NOT EXISTS idx_training_feedback_user_updated
+            ON training_feedback(user_id, updated_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_training_feedback_review
+            ON training_feedback(status, consent_snapshot, id);
         """
     )
     try:
@@ -740,6 +769,274 @@ def memoria_usuario_config_atualizar(
     if row is None:
         raise LookupError("configuração de memória não encontrada")
     return _memory_settings_dict(row)
+
+
+_TRAINING_RATINGS = {"up", "down"}
+_TRAINING_EMAIL_PATTERN = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+)
+_TRAINING_CPF_PATTERN = re.compile(r"\b\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[-\s]?\d{2}\b")
+_TRAINING_PHONE_PATTERN = re.compile(
+    r"\b(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]?\d{4}\b"
+)
+_TRAINING_TOKEN_PATTERN = re.compile(
+    r"\b(?:sk|hf|ghp|AIza)[_-]?[A-Za-z0-9_-]{16,}\b", flags=re.IGNORECASE
+)
+_TRAINING_SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"\b(?:senha|password|api[ _-]?key|chave[ _-]?(?:api|privada|secreta)|"
+    r"token)\b\s*(?:[:=]|é)?\s*\S{4,}",
+    flags=re.IGNORECASE,
+)
+
+
+def _normalize_training_text(
+    value: Any,
+    field: str,
+    maximum: int,
+    *,
+    required: bool = True,
+) -> tuple[str, bool]:
+    """Normaliza e remove PII antes de uma conversa entrar na fila de revisão."""
+
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text and required:
+        raise ValueError(f"{field} não pode ficar vazio")
+    if len(text) > maximum:
+        raise ValueError(f"{field} pode ter no máximo {maximum} caracteres")
+    if not text:
+        return "", False
+
+    redacted = False
+    for pattern, replacement in (
+        (_TRAINING_EMAIL_PATTERN, "[EMAIL_REMOVIDO]"),
+        (_TRAINING_CPF_PATTERN, "[CPF_REMOVIDO]"),
+        (_TRAINING_PHONE_PATTERN, "[TELEFONE_REMOVIDO]"),
+        (_TRAINING_TOKEN_PATTERN, "[TOKEN_REMOVIDO]"),
+        (_TRAINING_SECRET_ASSIGNMENT_PATTERN, "[SEGREDO_REMOVIDO]"),
+    ):
+        text, count = pattern.subn(replacement, text)
+        redacted = redacted or bool(count)
+    return text, redacted
+
+
+def _feedback_quality_score(
+    prompt: str,
+    response: str,
+    rating: str,
+    correction: str,
+    redacted: bool,
+) -> int:
+    """Filtro determinístico: organiza a fila, mas nunca aprova treino sozinho."""
+
+    score = 45
+    if len(prompt) >= 8:
+        score += 10
+    if len(response) >= 16:
+        score += 15
+    if rating == "up":
+        score += 10
+    elif correction:
+        score += 20
+    else:
+        score += 5
+    words = re.findall(r"[A-Za-zÀ-ÿ0-9]{2,}", response.lower())
+    if len(words) >= 4 and len(set(words)) / len(words) < 0.45:
+        score -= 35
+    if redacted:
+        score -= 10
+    return max(0, min(100, score))
+
+
+def _training_feedback_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    item = _row_dict(row)
+    if item is None:
+        return None
+    item["consent_snapshot"] = bool(item.get("consent_snapshot"))
+    item["redacted"] = bool(item.get("redacted"))
+    return item
+
+
+def feedback_treino_registrar(
+    user_id: int,
+    prompt: Any,
+    response: Any,
+    rating: Any,
+    *,
+    correction: Any = None,
+    chat_id: Any = None,
+) -> dict[str, Any]:
+    """Registra avaliação consentida para curadoria offline, nunca para treino em tempo real."""
+
+    settings = memoria_usuario_config(user_id)
+    if not settings["training_consent"]:
+        raise PermissionError("ative a contribuição para treino antes de enviar avaliações")
+    normalized_rating = str(rating or "").strip().lower()
+    if normalized_rating not in _TRAINING_RATINGS:
+        raise ValueError("rating deve ser 'up' ou 'down'")
+    normalized_prompt, prompt_redacted = _normalize_training_text(prompt, "pergunta", 12_000)
+    normalized_response, response_redacted = _normalize_training_text(response, "resposta", 16_000)
+    normalized_correction, correction_redacted = _normalize_training_text(
+        correction, "correção", 4_000, required=False
+    )
+    if normalized_rating == "down" and not normalized_correction:
+        # Um voto negativo sem resposta alternativa é útil para análise, mas
+        # não vira automaticamente um exemplo supervisionado.
+        normalized_correction = ""
+
+    normalized_chat_id: int | None = None
+    if chat_id not in {None, ""}:
+        try:
+            normalized_chat_id = int(chat_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("chat_id inválido") from exc
+        if normalized_chat_id <= 0:
+            raise ValueError("chat_id inválido")
+
+    redacted = prompt_redacted or response_redacted or correction_redacted
+    quality_score = _feedback_quality_score(
+        normalized_prompt,
+        normalized_response,
+        normalized_rating,
+        normalized_correction,
+        redacted,
+    )
+    status = "pending_human_review" if quality_score >= 40 else "rejected_by_quality_gate"
+    fingerprint = hashlib.sha256(
+        f"{normalized_prompt}\0{normalized_response}".encode()
+    ).hexdigest()
+
+    with _connection_scope() as connection:
+        _ensure_user_memory_settings(connection, user_id)
+        if normalized_chat_id is not None:
+            owner = connection.execute(
+                "SELECT id FROM chats WHERE id = ? AND usuario_id = ?",
+                (normalized_chat_id, int(user_id)),
+            ).fetchone()
+            if owner is None:
+                raise ValueError("chat não encontrado ou não pertence a esta conta")
+        connection.execute(
+            """
+            INSERT INTO training_feedback (
+                user_id, chat_id, fingerprint, prompt, response, rating, correction,
+                quality_score, status, consent_snapshot, redacted, updated_at, reviewed_at,
+                review_note
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, NULL, NULL)
+            ON CONFLICT(user_id, fingerprint) DO UPDATE SET
+                chat_id = excluded.chat_id,
+                rating = excluded.rating,
+                correction = excluded.correction,
+                quality_score = excluded.quality_score,
+                status = excluded.status,
+                consent_snapshot = 1,
+                redacted = excluded.redacted,
+                updated_at = CURRENT_TIMESTAMP,
+                reviewed_at = NULL,
+                review_note = NULL
+            """,
+            (
+                int(user_id),
+                normalized_chat_id,
+                fingerprint,
+                normalized_prompt,
+                normalized_response,
+                normalized_rating,
+                normalized_correction or None,
+                quality_score,
+                status,
+                int(redacted),
+            ),
+        )
+        row = connection.execute(
+            "SELECT * FROM training_feedback WHERE user_id = ? AND fingerprint = ?",
+            (int(user_id), fingerprint),
+        ).fetchone()
+    return _training_feedback_dict(row) or {}
+
+
+def feedback_treino_resumo_usuario(user_id: int) -> dict[str, int]:
+    """Contagens que podem aparecer na interface, sempre restritas à própria conta."""
+
+    counts = {
+        "total": 0,
+        "pending_human_review": 0,
+        "approved": 0,
+        "rejected": 0,
+    }
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            "SELECT status, COUNT(*) AS total FROM training_feedback "
+            "WHERE user_id = ? GROUP BY status",
+            (int(user_id),),
+        ).fetchall()
+    for row in rows:
+        total = int(row["total"])
+        status = str(row["status"])
+        counts["total"] += total
+        if status == "pending_human_review":
+            counts["pending_human_review"] += total
+        elif status == "approved":
+            counts["approved"] += total
+        else:
+            counts["rejected"] += total
+    return counts
+
+
+def feedback_treino_listar_usuario(user_id: int, limite: int = 100) -> list[dict[str, Any]]:
+    maximum = max(1, min(int(limite), 200))
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM training_feedback WHERE user_id = ?
+            ORDER BY updated_at DESC, id DESC LIMIT ?
+            """,
+            (int(user_id), maximum),
+        ).fetchall()
+    return [_training_feedback_dict(row) for row in rows if row is not None]
+
+
+def feedback_treino_revisar(
+    feedback_id: int,
+    *,
+    approved: bool,
+    note: str = "",
+) -> dict[str, Any] | None:
+    """Ação deliberada para a etapa offline de curadoria humana."""
+
+    status = "approved" if approved else "rejected_by_reviewer"
+    with _connection_scope() as connection:
+        connection.execute(
+            """
+            UPDATE training_feedback
+            SET status = ?, review_note = ?, reviewed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (status, str(note or "")[:500] or None, int(feedback_id)),
+        )
+        row = connection.execute(
+            "SELECT * FROM training_feedback WHERE id = ?", (int(feedback_id),)
+        ).fetchone()
+    return _training_feedback_dict(row)
+
+
+def feedback_treino_aprovados(limite: int = 10_000) -> list[dict[str, Any]]:
+    """Retorna somente exemplos revisados cuja pessoa ainda mantém consentimento."""
+
+    maximum = max(1, min(int(limite), 100_000))
+    with _connection_scope() as connection:
+        rows = connection.execute(
+            """
+            SELECT feedback.* FROM training_feedback AS feedback
+            JOIN user_memory_settings AS settings ON settings.user_id = feedback.user_id
+            WHERE feedback.status = 'approved'
+              AND feedback.consent_snapshot = 1
+              AND settings.training_consent = 1
+            ORDER BY feedback.id ASC
+            LIMIT ?
+            """,
+            (maximum,),
+        ).fetchall()
+    return [_training_feedback_dict(row) for row in rows if row is not None]
 
 
 def _normalize_memory_content(content: Any) -> str:
