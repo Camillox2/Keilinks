@@ -180,12 +180,14 @@ def main() -> None:
         log(f"Binários já concluídos: {binary_dir}")
 
     burn_checkpoint = output / "pretrain_final.pt"
+    paused_checkpoint = output / "pretrain_paused.pt"
     if not burn_checkpoint.exists():
+        burn_resume = ["--resume", str(paused_checkpoint)] if paused_checkpoint.exists() else []
         run_module(
             "treino.v4.pretreinar", "--model", "core_380m_modern",
             "--profile", "rtx5050_380m", "--input", str(corpus),
             "--vocab", str(vocab), "--binary-dir", str(binary_dir),
-            "--output", str(output), "--steps", str(args.burn_in_steps),
+            "--output", str(output), "--steps", str(args.burn_in_steps), *burn_resume,
         )
     else:
         log(f"Checkpoint de burn-in já existe: {burn_checkpoint}")
@@ -198,13 +200,17 @@ def main() -> None:
         log("Burn-in concluído. Pré-treino longo exige --continue-after-burn-in.")
         return
 
-    log(f"Iniciando pré-treino longo até o passo {args.long_steps:,}")
+    long_resume = paused_checkpoint if paused_checkpoint.exists() else burn_checkpoint
+    log(
+        f"Iniciando pré-treino longo até o passo {args.long_steps:,} "
+        f"a partir de {long_resume.name}"
+    )
     run_module(
         "treino.v4.pretreinar", "--model", "core_380m_modern",
         "--profile", "rtx5050_380m", "--input", str(corpus),
         "--vocab", str(vocab), "--binary-dir", str(binary_dir),
         "--output", str(output), "--steps", str(args.long_steps),
-        "--resume", str(burn_checkpoint),
+        "--resume", str(long_resume),
     )
 
 

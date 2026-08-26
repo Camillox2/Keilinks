@@ -316,6 +316,11 @@ def pretrain(args: argparse.Namespace) -> None:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+    pause_file = (
+        Path(args.pause_file)
+        if args.pause_file
+        else output_dir / "PAUSE_REQUESTED"
+    )
     resume_path = (
         Path(args.resume)
         if args.resume
@@ -531,6 +536,19 @@ def pretrain(args: argparse.Namespace) -> None:
                 include_optimizer=True,
             )
 
+        if pause_file.exists():
+            save(
+                "pretrain_paused.pt",
+                step,
+                include_optimizer=True,
+            )
+            print(
+                f"Pausa solicitada em {pause_file}; checkpoint seguro salvo "
+                f"no passo {step}. Remova o arquivo para retomar.",
+                flush=True,
+            )
+            return
+
     save(
         "pretrain_final.pt",
         train_config.max_steps - 1,
@@ -571,6 +589,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--no-compile", action="store_true"
+    )
+    parser.add_argument(
+        "--pause-file",
+        help=(
+            "Arquivo sentinela para pausa segura; por padrão usa "
+            "<output>/PAUSE_REQUESTED."
+        ),
     )
     return parser.parse_args()
 

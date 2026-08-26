@@ -39,6 +39,43 @@ logs, checkpoints, validação, temperatura e processos concorrentes aumentam
 esse tempo. Trate o primeiro ciclo como um experimento longo e retomável, não
 como um download que termina o modelo.
 
+## Acompanhamento e pausa segura
+
+Abra o painel local com:
+
+```powershell
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.monitorar_380m
+```
+
+Ele exibe a etapa atual, tamanho/taxa/ETA da coleta, disco, GPU, VRAM, loss,
+LR, tokens por segundo, ETA do pré-treino e os três checkpoints mais recentes.
+`Ctrl+C` fecha somente o painel.
+
+- `pretrain_best.pt`: pesos com melhor validação, reavaliados a cada 250 passos;
+- `pretrain_latest.pt`: pesos e otimizador, salvo a cada 1.000 passos para
+  retomada;
+- `pretrain_final.pt`: fechamento normal do ciclo;
+- `pretrain_paused.pt`: checkpoint completo feito após uma pausa solicitada.
+
+Para pedir uma pausa sem perder mais que o passo em andamento:
+
+```powershell
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.monitorar_380m --request-pause
+```
+
+Depois, remova a solicitação e retome pelo orquestrador, que prefere o
+checkpoint pausado quando ele existe:
+
+```powershell
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.monitorar_380m --clear-pause
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.orquestrar_380m --continue-after-burn-in
+```
+
+Em 100.000 passos o modelo terá visto aproximadamente 3,28 bilhões de tokens
+(62,5% da exposição planejada). É um bom ponto de decisão, mas não um sinal
+automático de que "já basta": compare `pretrain_best.pt`, a curva de validação
+e a avaliação congelada antes de parar definitivamente ou seguir para SFT.
+
 ## Dados em coleta
 
 O run `public-pt-380m-01` reserva até 20 GiB de JSONL rastreável:
