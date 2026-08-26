@@ -11,6 +11,7 @@ from dados.database import _hash_senha, _verificar_senha
 from keilinks_v5.data import prepare_sft_dataset, redact_sensitive_text
 from keilinks_v5.feedback import RecentInteractionCache
 from keilinks_v5.rag import LocalKnowledgeStore
+from keilinks_v5.runtime import UnslothRuntime, leaked_control_markers, sanitize_generated_text
 from keilinks_v5.safety import immediate_safety_intervention
 from keilinks_v5.security import SlidingWindowRateLimiter, api_key_matches
 from keilinks_v5.server import create_app
@@ -49,6 +50,22 @@ class TestV5Core(unittest.TestCase):
         self.assertFalse(limiter.allow("client"))
         self.assertTrue(api_key_matches("a" * 24, "a" * 24))
         self.assertFalse(api_key_matches("a" * 24, "b" * 24))
+
+    def test_internal_tool_markers_are_detected(self) -> None:
+        self.assertEqual(
+            leaked_control_markers("Resposta <tool_call> interna</tool_call>"),
+            ["<tool_call>", "</tool_call>"],
+        )
+        self.assertEqual(leaked_control_markers("Resposta normal."), [])
+        self.assertEqual(
+            sanitize_generated_text("<tool_call>\n\nResposta segura.</tool_call>"),
+            "Resposta segura.",
+        )
+        chunks = iter(["<tool_call>\n\n", "\nResposta em streaming.", "</tool_call>"])
+        self.assertEqual(
+            "".join(UnslothRuntime._sanitized_stream(chunks)),
+            "Resposta em streaming.",
+        )
 
     def test_password_hash_rejects_wrong_password_and_marks_legacy(self) -> None:
         stored = _hash_senha("senha-de-teste")

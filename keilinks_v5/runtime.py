@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from collections.abc import Iterator, Sequence
@@ -11,6 +12,26 @@ from dataclasses import asdict, dataclass
 from .rag import LocalKnowledgeStore, RetrievedChunk
 from .safety import SAFETY_SOURCES, immediate_safety_intervention
 from .settings import KeilinksSettings
+
+CONTROL_MARKERS = (
+    "<tool_call>",
+    "</tool_call>",
+    "<tool_response>",
+    "</tool_response>",
+)
+
+
+def leaked_control_markers(text: str) -> list[str]:
+    """Retorna marcadores internos que nunca devem chegar ao usuário."""
+    lowered = text.lower()
+    return [marker for marker in CONTROL_MARKERS if marker in lowered]
+
+
+def sanitize_generated_text(text: str) -> str:
+    """Remove apenas marcadores internos; nunca executa nem interpreta ferramentas."""
+    for marker in CONTROL_MARKERS:
+        text = re.sub(re.escape(marker), "", text, flags=re.IGNORECASE)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 @dataclass(frozen=True)
@@ -157,6 +178,31 @@ class UnslothRuntime:
         return {name: value.to(device) for name, value in rendered.items()}
 
     @staticmethod
+    def _sanitized_stream(chunks: Iterator[str]) -> Iterator[str]:
+        """Evita vazar marcadores mesmo se eles chegarem divididos entre chunks."""
+        pending = ""
+        started = False
+        marker_buffer = max(len(marker) for marker in CONTROL_MARKERS) - 1
+        for chunk in chunks:
+            pending += chunk
+            for marker in CONTROL_MARKERS:
+                pending = re.sub(re.escape(marker), "", pending, flags=re.IGNORECASE)
+            safe_length = max(0, len(pending) - marker_buffer)
+            if safe_length:
+                safe_text = pending[:safe_length]
+                pending = pending[safe_length:]
+                if not started:
+                    safe_text = safe_text.lstrip()
+                    started = bool(safe_text)
+                if safe_text:
+                    yield safe_text
+        final_text = sanitize_generated_text(pending)
+        if not started:
+            final_text = final_text.lstrip()
+        if final_text:
+            yield final_text
+
+    @staticmethod
     def _sources(retrieved: list[RetrievedChunk]) -> list[dict[str, object]]:
         return [
             {
@@ -217,7 +263,7 @@ class UnslothRuntime:
         with self._torch.inference_mode():
             output = self._model.generate(**generation_kwargs)
         generated = output[0, prompt_tokens:]
-        text = self._tokenizer.decode(generated, skip_special_tokens=True).strip()
+        text = sanitize_generated_text(self._tokenizer.decode(generated, skip_special_tokens=True))
         elapsed_ms = (time.perf_counter() - started) * 1000
         if not text:
             text = "Não consegui gerar uma resposta útil agora. Pode reformular a pergunta?"
@@ -279,7 +325,7 @@ class UnslothRuntime:
             target=self._model.generate, kwargs=generation_kwargs, daemon=True
         )
         worker.start()
-        return iter(streamer), self._sources(retrieved), self.model_id
+        return self._sanitized_stream(iter(streamer)), self._sources(retrieved), self.model_id
 
     def status(self) -> dict[str, object]:
         info: dict[str, object] = {

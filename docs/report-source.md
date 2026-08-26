@@ -10,8 +10,8 @@ autoaperfeiçoamento seguro.
 O projeto agora possui uma rota de produto mensurável: Qwen3-4B em 4 bits
 adaptado por QLoRA/Unsloth, API FastAPI local com streaming, RAG híbrido com
 proveniência, visão opt-in, um gate de crise iminente e um ciclo de dados que
-exige consentimento e aprovação humana. O adaptador V3 foi treinado na máquina
-alvo e respondeu pela API real.
+exige consentimento e aprovação humana. O adaptador V4 controlado foi treinado
+na máquina-alvo, passou pela avaliação congelada e respondeu pela API real.
 
 O que não foi tratado como pronto: AGI, pré-treino brasileiro de escala web,
 feedback que retreina sozinho em produção ou estimativas de VRAM não medidas.
@@ -24,18 +24,35 @@ ser promovido.
 | --- | --- | --- |
 | GPU | RTX 5050 Laptop, 8.151 MB, BF16 disponível | verificação PyTorch/CUDA no ambiente .venv-unsloth |
 | Base de linguagem | Qwen3-4B-Instruct-2507 4-bit | carregamento em keilinks_v5/runtime.py |
-| Treino V3 | concluído, 20 passos e 33.030.144 parâmetros LoRA treináveis (0,81%) | manifesto local do adaptador V3 |
-| Validação | eval_loss 2,0856 no checkpoint de referência | manifesto do treino V3 |
-| Avaliação congelada | 14/18 na regra lexical; 2 casos web ignorados por padrão | resultado local v3-gated.json |
-| Inferência real | resposta V3 para “o que é uma API?” via FastAPI | teste em 127.0.0.1:8012 nesta revisão |
+| Treino V4 | concluído, 40 passos e 33.030.144 parâmetros LoRA treináveis (0,81%) | manifesto local do adaptador V4 |
+| Validação | melhor eval_loss 2,0747 no checkpoint selecionado | manifesto do treino V4 |
+| Avaliação congelada | 15/18 na regra lexical; 2 casos web ignorados por padrão | resultado local v4-controlled-sanitized.json |
+| Inferência real | resposta V4 para “o que é uma API?” via FastAPI | teste local nesta revisão |
 | Streaming | SSE finalizado com marcador [DONE] | endpoint /v1/chat/completions |
 | Visão | SmolVLM2 4-bit analisou uma imagem de teste; pico observado de aproximadamente 1,67 GiB | keilinks_v5/vision.py e teste local |
 | Testes | 16 testes passaram | pytest de tests/test_v5_core.py e tests/test_v5_pipeline.py |
 
-O 14/18 é reportado sem maquiagem. As quatro falhas restantes foram respostas
-semanticamente razoáveis reprovadas por palavras-chave rígidas. A conclusão é
-que a próxima melhoria deve combinar rubricas estruturadas, inspeção humana e
-testes adversariais; não aumentar passos até encaixar em uma string.
+O 14/18 do V3 e o 15/18 do V4 são reportados sem maquiagem. As falhas restantes
+foram respostas semanticamente razoáveis reprovadas por palavras-chave rígidas.
+A conclusão é que a próxima melhoria deve combinar rubricas estruturadas,
+inspeção humana e testes adversariais; não aumentar passos até encaixar em uma
+string.
+
+### Fine-tuning V4 controlado
+
+O candidato V4 usou o mesmo conjunto com holdout protegido, 40 passos, LoRA
+rank 16, alpha 32, batch efetivo 8 e learning rate de 0,0001. O treino levou
+151 segundos na RTX 5050 e o melhor checkpoint teve eval_loss 2,0747, contra
+2,0856 do V3. No benchmark congelado, o V4 passou 15 de 18 casos, contra 14
+do V3. A melhoria principal apareceu nos casos emocional e de priorização no
+trabalho.
+
+Durante a promoção, um caso mostrou o marcador interno de ferramenta no texto
+gerado. O runtime agora sanitiza esse marcador, inclusive no SSE, e o
+avaliador reprova explicitamente qualquer vazamento futuro. A validação final
+do V4 continuou em 15/18 sem marcador vazado. O adaptador fica fora do Git
+porque é um artefato local grande; o caminho padrão é
+checkpoints/keilinks-qwen3-4b-lora-v4-controlled.
 
 ## Decisões técnicas
 
@@ -79,7 +96,7 @@ Cliente local
             +-- gate de crise iminente --> resposta segura, CVV, SAMU e UPA
             +-- recuperação RAG por RRF --> contexto marcado como não confiável
             +-- VisionService opt-in --> OCR e descrição marcados como não confiáveis
-            +-- Qwen3 4-bit + adaptador Keilinks V3 --> JSON ou SSE
+            +-- Qwen3 4-bit + adaptador Keilinks V4 --> JSON ou SSE
                                                         |
                                            cache efêmero de interação
                                                         |
@@ -200,7 +217,7 @@ prompt injection e acesso entre tenants.
 ### Fase 0 — concluída nesta revisão
 
 - Instalação Windows/RTX 5050 reproduzível com Unsloth e verificação CUDA.
-- QLoRA V3 treinado, API e SSE testados.
+- QLoRA V3 estabelecido como baseline e V4 controlado treinado, avaliado e promovido.
 - Código V5 do Gemini substituído por fachadas de compatibilidade seguras,
   removendo fallback visual falso e código remoto não auditado.
 - RAG, feedback consentido, avaliação congelada, guard de leakage, segurança
@@ -222,7 +239,7 @@ prompt injection e acesso entre tenants.
 1. Coletar pequenas amostras de fontes abertas somente após aceitar termos.
 2. Deduplicar contra treino, validação e holdout; revisar PII e licenças.
 3. Usar feedback apenas com consentimento e revisão humana.
-4. Construir o primeiro lote DPO e comparar com V3.
+4. Construir o primeiro lote DPO e comparar com V4.
 5. Usar avaliador LLM só como sinal auxiliar e medir viés contra pares humanos.
 
 ### Fase 3 — escala e serving

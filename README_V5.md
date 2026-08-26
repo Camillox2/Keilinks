@@ -12,7 +12,7 @@ O diagnóstico, as decisões técnicas, as fontes e o plano de evolução estão
 ## O que já existe
 
 - Base padrão: unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit mais adaptador
-  LoRA Keilinks V3.
+  LoRA Keilinks V4 controlado.
 - Backend FastAPI local com SSE real em /v1/chat/completions.
 - RAG local: SQLite FTS5/BM25, embeddings opcionais em CPU e RRF.
 - Documentos com hash, origem e isolamento por tenant_id.
@@ -63,8 +63,8 @@ para validar a integração inicial.
 # Smoke test
 python -m treino.v5.treinar_unsloth --train-data keilinks_data/training/v2/train.jsonl --validation-data keilinks_data/training/v2/validation.jsonl --output checkpoints/keilinks-smoke --max-steps 5
 
-# Adaptador V3 de referência
-python -m treino.v5.treinar_unsloth --train-data keilinks_data/training/v2/train.jsonl --validation-data keilinks_data/training/v2/validation.jsonl --output checkpoints/keilinks-qwen3-4b-lora-v3-gated --max-steps 20 --max-seq-length 1024 --gradient-accumulation 8
+# Adaptador V4 controlado de referência
+python -m treino.v5.treinar_unsloth --train-data keilinks_data/training/v2/train.jsonl --validation-data keilinks_data/training/v2/validation.jsonl --output checkpoints/keilinks-qwen3-4b-lora-v4-controlled --max-steps 40 --max-seq-length 1024 --gradient-accumulation 8 --learning-rate 0.0001
 ~~~
 
 Compare o training_manifest.json do candidato com o adaptador anterior. Um

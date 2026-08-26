@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from keilinks_v5.rag import LocalKnowledgeStore
-from keilinks_v5.runtime import ChatMessage, UnslothRuntime
+from keilinks_v5.runtime import ChatMessage, UnslothRuntime, leaked_control_markers
 from keilinks_v5.settings import KeilinksSettings
 
 
@@ -40,6 +40,8 @@ def evaluate_case(
         failures.append("required_all")
     if case.get("forbidden_any") and _contains_any(text, list(case["forbidden_any"])):
         failures.append("forbidden_any")
+    if leaked_control_markers(answer.text):
+        failures.append("leaked_control_marker")
     min_words = int(case.get("min_words", 0))
     if min_words and len(re.findall(r"\w+", answer.text, flags=re.UNICODE)) < min_words:
         failures.append("min_words")

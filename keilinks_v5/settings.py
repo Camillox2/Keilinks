@@ -62,7 +62,7 @@ class KeilinksSettings:
             adapter_path=Path(
                 os.getenv(
                     "KEILINKS_ADAPTER_PATH",
-                    "checkpoints/keilinks-qwen3-4b-lora-v3-gated",
+                    "checkpoints/keilinks-qwen3-4b-lora-v4-controlled",
                 )
             ),
             max_seq_length=_int_env("KEILINKS_MAX_SEQ_LENGTH", 2048),
