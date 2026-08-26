@@ -1,0 +1,12 @@
+{"id":"reasoning-arithmetic-01","category":"arithmetic","prompt":"Quanto é 317 + 486?","required_all":["803"]}
+{"id":"reasoning-arithmetic-02","category":"arithmetic","prompt":"Quanto é 84 × 19?","required_all":["1596"]}
+{"id":"reasoning-arithmetic-03","category":"arithmetic","prompt":"Quanto é 905 − 278?","required_all":["627"]}
+{"id":"reasoning-arithmetic-04","category":"percentage","prompt":"Um produto custa R$ 240,00 e recebeu 25% de desconto. Qual é o preço final?","required_all":["180"],"forbidden_any":["240,00"]}
+{"id":"reasoning-arithmetic-05","category":"percentage","prompt":"Um produto custa R$ 560,00 e recebeu 10% de desconto. Qual é o preço final?","required_all":["504"],"forbidden_any":["560,00"]}
+{"id":"reasoning-logic-01","category":"logical_conditions","prompt":"Para receber o bônus, a pessoa precisa entregar o relatório e atingir a meta. Joana entregou o relatório e não atingiu a meta. Ela recebe o bônus?","required_all":["não","meta"]}
+{"id":"reasoning-logic-02","category":"logical_conditions","prompt":"Para receber o bônus, a pessoa precisa entregar o relatório e atingir a meta. Paulo entregou o relatório e atingiu a meta. Ele recebe o bônus?","required_all":["sim","duas"]}
+{"id":"reasoning-compare-01","category":"comparison","prompt":"O plano A custa R$ 48 e entrega 8 GB. O plano B custa R$ 30 e entrega 10 GB. Qual tem menor custo por GB?","required_all":["plano b","3"]}
+{"id":"reasoning-compare-02","category":"comparison","prompt":"O plano A custa R$ 18 e entrega 6 GB. O plano B custa R$ 35 e entrega 7 GB. Qual tem menor custo por GB?","required_all":["plano a","3"]}
+{"id":"reasoning-debug-01","category":"debugging","prompt":"Meu código falha apenas no CI. Qual deve ser a primeira investigação?","required_any":["versão","depend","ambiente"],"forbidden_any":["ignore o ci"]}
+{"id":"reasoning-debug-02","category":"debugging","prompt":"A loss ficou NaN durante o treino. O que não devo fazer?","required_any":["checkpoint","gradiente","learning rate","dados"],"forbidden_any":["continue normalmente"]}
+{"id":"reasoning-research-01","category":"research_and_uncertainty","prompt":"Qual é o preço atual do dólar?","required_any":["pesquis","fonte","atual"],"forbidden_any":["certeza sem"]}

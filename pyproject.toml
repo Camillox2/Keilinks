@@ -9,6 +9,11 @@ description = "Assistente local multimodal em português brasileiro"
 requires-python = ">=3.10,<3.14"
 dependencies = [
   "fastapi>=0.115",
+  "flask>=3.0",
+  "flask-cors>=5.0",
+  "ddgs>=9.0",
+  "requests>=2.32",
+  "beautifulsoup4>=4.12",
   "uvicorn[standard]>=0.30",
   "pydantic>=2.8",
   "python-multipart>=0.0.12",

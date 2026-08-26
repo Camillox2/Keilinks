@@ -14,7 +14,7 @@ def main() -> None:
     parser.add_argument("--vocab", default="dados/v4/pretrain/tokenizer.json")
     parser.add_argument("--input", nargs="+", default=["dados/v4/sft/all_sft.jsonl"])
     parser.add_argument("--output", default="dados/v4/packed")
-    parser.add_argument("--context", type=int, default=2048)
+    parser.add_argument("--context", type=int, default=8192)
     parser.add_argument("--validation-ratio", type=float, default=0.02)
     args = parser.parse_args()
 

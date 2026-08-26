@@ -168,13 +168,23 @@ TRAIN_PROFILES: dict[str, TrainConfig] = {
         warmup_steps=3_000, checkpoint_mode="full", checkpoint_every=1,
         optimizer="adamw_8bit",
     ),
-    "rtx5050_sft_380m": TrainConfig(
-        profile="rtx5050_sft_380m", phase="sft",
+    "rtx5050_sft_380m_2k": TrainConfig(
+        profile="rtx5050_sft_380m_2k", phase="sft",
         micro_batch_size=1, grad_accum_steps=16,
         max_steps=10_000, learning_rate=5e-5, min_learning_rate=5e-6,
         warmup_steps=200, weight_decay=0.05,
         eval_interval=100, save_interval=500,
         checkpoint_mode="selective", checkpoint_every=2,
+        optimizer="adamw_8bit",
+    ),
+    "rtx5050_sft_380m": TrainConfig(
+        # Mantém 32.768 tokens por atualização no Core operacional de 8k.
+        profile="rtx5050_sft_380m", phase="sft",
+        micro_batch_size=1, grad_accum_steps=4,
+        max_steps=10_000, learning_rate=5e-5, min_learning_rate=5e-6,
+        warmup_steps=200, weight_decay=0.05,
+        eval_interval=50, save_interval=100,
+        checkpoint_mode="full", checkpoint_every=1,
         optimizer="adamw_8bit",
     ),
     "rtx5050_sft_500m": TrainConfig(

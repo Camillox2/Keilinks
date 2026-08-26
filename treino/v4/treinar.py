@@ -66,6 +66,18 @@ def make_loader(dataset: PackedBinaryDataset, config: TrainConfig,
     return DataLoader(**kwargs)
 
 
+def steps_for_epochs(dataset_blocks: int, config: TrainConfig, epochs: float) -> int:
+    """Converte épocas reais do SFT em passos, sem repetir corpus curto demais."""
+
+    if dataset_blocks < config.micro_batch_size:
+        raise ValueError("Dataset SFT menor que o batch físico")
+    if epochs <= 0:
+        raise ValueError("Épocas de SFT devem ser positivas")
+    batches_per_epoch = dataset_blocks // config.micro_batch_size
+    updates_per_epoch = batches_per_epoch / config.grad_accum_steps
+    return max(1, math.ceil(updates_per_epoch * epochs))
+
+
 def infinite_batches(loader: DataLoader) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
     while True:
         yield from loader
@@ -298,6 +310,22 @@ def train(args: argparse.Namespace) -> None:
             f"Dataset usa contexto {train_data.context_length}; "
             f"modelo usa {model_config.context_length}"
         )
+    if args.steps is None:
+        epochs = 3.0 if args.epochs is None else args.epochs
+        derived_steps = steps_for_epochs(len(train_data), train_config, epochs)
+        train_config = TrainConfig(**{
+            **asdict(train_config), "max_steps": derived_steps,
+        })
+        print(
+            f"SFT: {epochs:g} épocas em {len(train_data)} blocos -> "
+            f"{derived_steps} passos de otimização"
+        )
+    safe_warmup = min(train_config.warmup_steps, max(1, train_config.max_steps // 10))
+    if safe_warmup != train_config.warmup_steps:
+        train_config = TrainConfig(**{
+            **asdict(train_config), "warmup_steps": safe_warmup,
+        })
+        print(f"SFT: warmup ajustado para {safe_warmup} passos")
 
     train_loader = make_loader(train_data, train_config, shuffle=True)
     validation_loader = make_loader(validation_data, train_config, shuffle=False)
@@ -460,11 +488,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", default="core_380m_modern")
     parser.add_argument("--profile", default="rtx5050_sft_380m")
-    parser.add_argument("--data", default="dados/v4/packed")
+    parser.add_argument("--data", default="dados/v4/packed_sft_8k")
     parser.add_argument("--output", default="checkpoints/v4-sft")
     parser.add_argument("--init-checkpoint")
     parser.add_argument("--resume")
     parser.add_argument("--steps", type=int)
+    parser.add_argument(
+        "--epochs",
+        type=float,
+        help="Épocas de SFT; padrão seguro: 3. Ignorado quando --steps é informado.",
+    )
     parser.add_argument("--workers", type=int)
     parser.add_argument("--no-compile", action="store_true")
     parser.add_argument("--allow-random-init", action="store_true")
@@ -473,7 +506,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Autoriza o otimizador Muon experimental quando o perfil o selecionar.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.epochs is not None and args.epochs <= 0:
+        parser.error("--epochs deve ser positivo")
+    return args
 
 
 if __name__ == "__main__":

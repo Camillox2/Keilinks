@@ -16,6 +16,12 @@ from busca.web_v4 import (
     search_web,
     tem_evidencia_suficiente,
 )
+from cerebro.raciocinio import (
+    normalize_reasoning_mode,
+    parse_reasoning_output,
+    reasoning_instruction,
+    requires_reasoning,
+)
 from treino.v4.config import ModelConfig
 from treino.v4.modelo import KeilinksV4
 from treino.v4.tokenizador import TokenizadorV4
@@ -28,6 +34,8 @@ class RuntimeAnswer:
     used_web: bool
     prompt_tokens: int
     generated_tokens: int
+    reasoning_mode: str = "auto"
+    used_reasoning: bool = False
 
 
 class V4Runtime:
@@ -98,10 +106,12 @@ class V4Runtime:
                      memory_context: str = "",
                      semantic_context: str = "",
                      web_context: str = "",
-                     max_new_tokens: int = 256) -> List[int]:
+                     max_new_tokens: int = 256,
+                     reasoning: bool = False) -> List[int]:
         reserve = min(max_new_tokens + 16, self.config.context_length // 2)
         budget = self.config.context_length - reserve
-        system = self._segment("system", self.system_prompt)
+        system_prompt = self.system_prompt + (reasoning_instruction() if reasoning else "")
+        system = self._segment("system", system_prompt)
         current = self._segment("user", message) + self._segment(
             "assistant", "", close=False
         )
@@ -194,12 +204,17 @@ class V4Runtime:
                semantic_context: str = "",
                web_enabled: bool = True,
                web_mode: str = "auto",
+               reasoning_mode: str = "auto",
                max_new_tokens: int = 256,
                temperature: float = 0.75,
                top_p: float = 0.9) -> RuntimeAnswer:
         message = re.sub(r"\s+", " ", message).strip()
         if not message:
             raise ValueError("Mensagem vazia")
+        reasoning_mode = normalize_reasoning_mode(reasoning_mode)
+        use_reasoning = reasoning_mode == "always" or (
+            reasoning_mode == "auto" and requires_reasoning(message)
+        )
 
         requires_web_sources = deve_pesquisar(message, web_mode)
         if requires_web_sources and not web_enabled:
@@ -212,6 +227,8 @@ class V4Runtime:
                 used_web=False,
                 prompt_tokens=0,
                 generated_tokens=0,
+                reasoning_mode=reasoning_mode,
+                used_reasoning=use_reasoning,
             )
 
         results: List[SearchResult] = []
@@ -230,12 +247,15 @@ class V4Runtime:
                 return RuntimeAnswer(
                     text=(
                         f"Não consegui obter {reason} suficientes para verificar essa resposta. "
-                        "Prefiro não transformar uma suposição em fato; tente novamente ou indique uma fonte."
+                        "Prefiro não transformar uma suposição em fato; tente novamente ou "
+                        "indique uma fonte."
                     ),
                     sources=[],
                     used_web=False,
                     prompt_tokens=0,
                     generated_tokens=0,
+                    reasoning_mode=reasoning_mode,
+                    used_reasoning=use_reasoning,
                 )
             web_context = format_context(message, results, max_chars=7000)
 
@@ -246,6 +266,7 @@ class V4Runtime:
             semantic_context=semantic_context,
             web_context=web_context,
             max_new_tokens=max_new_tokens,
+            reasoning=use_reasoning,
         )
         available = self.config.context_length - len(prompt_ids) - 1
         generation_limit = max(1, min(max_new_tokens, available))
@@ -265,6 +286,7 @@ class V4Runtime:
         for marker in ("<fim>", "<vitor>", "<sistema>", "<keilinks>"):
             if marker in text:
                 text = text.split(marker, 1)[0].strip()
+        text = parse_reasoning_output(text).final
         if not text:
             text = (
                 "Não consegui formular uma resposta confiável agora. "
@@ -279,4 +301,6 @@ class V4Runtime:
             used_web=bool(results),
             prompt_tokens=len(prompt_ids),
             generated_tokens=len(generated),
+            reasoning_mode=reasoning_mode,
+            used_reasoning=use_reasoning,
         )

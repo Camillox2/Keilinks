@@ -47,6 +47,71 @@ ideais na vazão compilada medida; logs, validações, temperatura e pausas pode
 aumentar esse prazo. Trate o ciclo como experimento longo e retomável, não como
 um download que termina o modelo.
 
+## Raciocínio curto, resposta melhor e botão no chat
+
+O Core não recebe uma cadeia de pensamento longa, opaca ou copiada da web. Ele
+recebe um **currículo de plano curto**: dados relevantes, ferramenta necessária
+(por exemplo, busca web) e uma checagem. A resposta final é treinada separada
+do plano e o runtime remove o plano antes de salvar ou exibir a conversa.
+
+O arquivo `treino/v4/preparar_raciocinio.py` gera 640 exemplos PT-BR
+determinísticos e verificáveis: contas, porcentagens, condições lógicas,
+comparação por critério, investigação de erro e decisão de consultar a web.
+Eles entram como aproximadamente 6,9% do SFT misturado atual (640 de 9.270
+exemplos), suficiente para ensinar o formato sem substituir conversa humana,
+empatia e instruções reais.
+
+Prepare o estágio antes do SFT, mas **não** antes do pré-treino: pesos ainda
+aleatórios não ganham capacidade de raciocínio apenas ao ver esses exemplos.
+O pré-treino cria a base linguística; o SFT a ensina a usar o protocolo quando
+for útil.
+
+```powershell
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.preparar_raciocinio
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.pack_sft_em_escala `
+  --context 8192 --output dados/v4/packed_sft_8k `
+  dados/v4/sft/all_sft_380m_reasoning_8k.jsonl
+```
+
+Depois do checkpoint de pré-treino aprovado, o SFT deve usar
+`core_380m_modern` e `rtx5050_sft_380m`: contexto 8.192, batch físico 1,
+quatro microbatches, checkpointing completo e `torch.compile`.
+
+```powershell
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.treinar `
+  --model core_380m_modern --profile rtx5050_sft_380m `
+  --data dados/v4/packed_sft_8k `
+  --epochs 3 `
+  --init-checkpoint checkpoints/v4-pretrain/pretrain_best.pt `
+  --output checkpoints/v4-sft-reasoning-8k
+```
+
+O treino SFT calcula três épocas reais por padrão quando `--steps` não é
+informado. No pacote atual de 219 blocos de treino, isso equivale a 165 passos
+de otimização, não aos 10.000 passos máximos do perfil. Essa proteção evita
+repetir o corpus curto mais de 180 vezes e destruir a generalização da conversa.
+O warmup também é limitado a no máximo 10% do ciclo efetivo, para que um SFT
+curto não passe inteiro apenas aquecendo a taxa de aprendizado.
+
+Na interface, o botão **🧠 Raciocínio** envia `reasoning_mode=always` para a
+próxima resposta. Desligado, o runtime usa `auto` e só pede plano em contas,
+comparações, depuração e decisões mais complexas. A API ainda aceita `never`
+para desabilitar o protocolo. O usuário vê apenas a resposta final; não há
+exposição de raciocínio interno ou de conteúdo de RAG/web.
+
+Antes de promover o checkpoint SFT, execute a avaliação congelada:
+
+```powershell
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.avaliar_raciocinio `
+  --checkpoint checkpoints/v4-sft-reasoning-8k/keilinks_v4.pt
+```
+
+Ela mede acerto em casos retidos de cálculo, condições, comparação, depuração
+e consulta atual. O gate exige melhora ou ausência de regressão na avaliação
+geral, nenhum marcador `[[PLANO]]`/`[[RESPOSTA]]` vazado ao usuário e respostas
+web ainda citáveis. Isso mede se o protocolo melhorou comportamento; não é uma
+alegação de que 640 exemplos transformaram um 380M em um modelo de fronteira.
+
 ## Acompanhamento e pausa segura
 
 Abra o painel local com:
@@ -134,6 +199,33 @@ não é uma garantia jurídica ou de anonimização.
    pré-treino, nunca de pesos aleatórios.
 8. DPO/GRPO só entra após pares de preferência corrigidos e aprovados. Feedback
    de usuário com consentimento não deve virar treino automático sem curadoria.
+
+## Linux/WSL e aceleração sem ilusão de hardware
+
+O benchmark 8k acima foi feito no Windows e já usa BF16, TF32, GQA, AdamW
+8-bit, checkpointing completo e `torch.compile`. A medição de 2.651 tok/s é um
+benchmark de cinco passos; o throughput do treino longo pode oscilar por
+validação, salvamento, temperatura e concorrência do Windows.
+
+Na verificação de 26/08/2026, `wsl.exe` existe, mas não há uma distribuição
+Linux registrada nem serviços WSL disponíveis; a consulta/ativação dos recursos
+Windows exige privilégios de administrador. A instalação oficial de WSL pode
+exigir reinicialização. Não reinicie durante a tokenização/preparo ativo: isso
+interromperia o pipeline antes do checkpoint seguro. Assim que houver uma janela
+segura, valide no Ubuntu/WSL2 com a mesma versão de PyTorch, o mesmo tokenizer e
+o mesmo benchmark de 8k; somente mantenha Linux se a métrica real superar o
+Windows.
+
+- Não existe como liberar mais VRAM física por software. Memória compartilhada
+  do Windows é paginação lenta, não substitui VRAM para pré-treino.
+- CPU ajuda a tokenizar, carregar dados e manter a GPU alimentada; não acelera
+  as multiplicações de matriz que dominam o treino do Transformer.
+- Overclock não é aplicado pelo projeto: numa GPU de notebook ele aumenta risco
+  térmico/instabilidade e pode piorar um treino de semanas. Só vale considerar
+  manualmente depois de monitorar temperatura, potência e estabilidade.
+- Ganhos reais adicionais vêm de kernels Linux que realmente passem no benchmark,
+  uma GPU com mais VRAM, ou uma GPU cloud; MoE não reduz o custo quadrático da
+  atenção de 8k e fica para depois da base e do SFT estáveis.
 
 ## Conversa natural e pesquisa web
 

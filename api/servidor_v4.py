@@ -22,6 +22,7 @@ sys.path.insert(0, str(BASE_DIR))
 from api import servidor as legacy
 from api.runtime_v4 import V4Runtime
 from busca.web_v4 import pesquisar as pesquisar_v4, precisa_buscar as precisa_buscar_v4
+from cerebro.raciocinio import normalize_reasoning_mode
 
 legacy.pesquisar = pesquisar_v4
 legacy.precisa_buscar = precisa_buscar_v4
@@ -157,6 +158,14 @@ def _semantic_context(message: str) -> tuple[str, float]:
     return "\n".join(pieces)[:5000], score
 
 
+def _reasoning_mode(payload: dict) -> str:
+    """Aceita o nome em português e o nome estável do contrato da API."""
+
+    return normalize_reasoning_mode(
+        payload.get("reasoning_mode", payload.get("raciocinio", "auto"))
+    )
+
+
 def chat_v4():
     if runtime is None:
         if _original_chat is None:
@@ -185,6 +194,7 @@ def chat_v4():
             semantic_context=semantic_context,
             web_enabled=bool(payload.get("web_enabled", True)),
             web_mode=str(payload.get("web_mode", "auto")),
+            reasoning_mode=_reasoning_mode(payload),
             max_new_tokens=min(int(payload.get("max_tokens", 256)), 512),
             temperature=float(payload.get("temperatura", 0.75)),
             top_p=float(payload.get("top_p", 0.9)),
@@ -222,11 +232,14 @@ def chat_v4():
         "confianca": 88 if answer.used_web else (75 if semantic_score >= 0.5 else 65),
         "prompt_tokens": answer.prompt_tokens,
         "generated_tokens": answer.generated_tokens,
+        "raciocinio": answer.reasoning_mode,
+        "usou_raciocinio": answer.used_reasoning,
         "pensamento": [
             "Runtime V4",
             f"Histórico: {len(history)} turnos",
             f"RAG score: {semantic_score:.2f}",
             f"Fontes web: {len(answer.sources)}",
+            f"Raciocínio: {answer.reasoning_mode}",
         ],
     })
 
@@ -248,6 +261,7 @@ def chat_stream_v4():
                 message,
                 web_enabled=bool(payload.get("web_enabled", True)),
                 web_mode=str(payload.get("web_mode", "auto")),
+                reasoning_mode=_reasoning_mode(payload),
                 max_new_tokens=min(int(payload.get("max_tokens", 256)), 512),
                 temperature=float(payload.get("temperatura", 0.75)),
             )
@@ -255,6 +269,7 @@ def chat_stream_v4():
                 "token": answer.text,
                 "done": True,
                 "fontes": answer.sources,
+                "raciocinio": answer.reasoning_mode,
             }, ensure_ascii=False) + "\n\n"
         except Exception as exc:
             yield "data: " + json.dumps({
