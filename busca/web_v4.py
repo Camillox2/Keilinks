@@ -12,7 +12,9 @@ import re
 import socket
 import sqlite3
 import time
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -32,7 +34,17 @@ TRUSTED_SUFFIXES = (".gov.br", ".gov", ".edu", ".edu.br", ".org", "who.int",
 CURRENT_TERMS = {"hoje","agora","atual","atualmente","último","ultima","última",
                  "preço","preco","notícia","noticia","presidente","ceo","versão",
                  "versao","lançamento","lancamento","placar","cotação","cotacao",
-                 "lei","regra","2025","2026","2027"}
+                 "lei","regra"}
+VERY_CURRENT_TERMS = {"hoje", "agora", "preço", "preco", "notícia", "noticia",
+                      "placar", "cotação", "cotacao"}
+CASUAL_PATTERNS = (
+    r"^\s*(oi|olá|ola|e aí|eai|bom dia|boa tarde|boa noite|tudo bem|como você está|como voce esta)\b",
+    r"^\s*(escreva|crie|invente|imagine|faça uma história|faca uma historia|traduza|revise)\b",
+)
+FACTUAL_PATTERNS = (
+    r"^\s*(o que|quem|qual|quais|quando|onde|por que|porque|como funciona|explique|me diga|me fale)\b",
+    r"\b(dados|estatística|estatistica|pesquisa científica|pesquisa cientifica|fonte|evidência|evidencia)\b",
+)
 
 
 @dataclass
@@ -56,10 +68,10 @@ def _connect_cache():
 def _cache_key(query): return hashlib.sha256(query.strip().lower().encode()).hexdigest()
 
 
-def cache_get(query):
+def cache_get(query, max_age_seconds: int = CACHE_TTL_SECONDS):
     with _connect_cache() as con:
         row=con.execute("SELECT created_at,payload FROM web_cache WHERE cache_key=?",(_cache_key(query),)).fetchone()
-    if not row or time.time()-float(row[0])>CACHE_TTL_SECONDS: return None
+    if not row or time.time()-float(row[0]) > max_age_seconds: return None
     try: return [SearchResult(**item) for item in json.loads(row[1])]
     except Exception: return None
 
@@ -72,9 +84,59 @@ def cache_set(query, results):
 
 def precisa_buscar(pergunta: str) -> bool:
     text=pergunta.lower()
-    if any(term in text for term in CURRENT_TERMS): return True
+    years = {str(date.today().year + offset) for offset in range(-1, 3)}
+    if any(term in text for term in CURRENT_TERMS | years): return True
     return any(re.search(p,text) for p in (r"\bquem (é|e) (o|a) atual\b",r"\bquanto custa\b",
         r"\bqual (é|e) a versão\b",r"\bpesquis[ae]\b",r"\bconfir[am]\b",r"\bna (internet|web)\b"))
+
+
+def exige_fontes_atualizadas(pergunta: str) -> bool:
+    """Indica quando uma fonte enciclopédica isolada não é evidência bastante.
+
+    A função é mais estreita que :func:`precisa_buscar`: pedir uma explicação
+    pesquisada exige fontes, mas não necessariamente uma notícia publicada hoje.
+    """
+    text = pergunta.lower()
+    years = {str(date.today().year + offset) for offset in range(-1, 3)}
+    if any(term in text for term in CURRENT_TERMS | years):
+        return True
+    return any(re.search(pattern, text) for pattern in (
+        r"\bquem (é|e) (o|a) atual\b",
+        r"\bqual (é|e) a versão\b",
+        r"\bquanto custa\b",
+    ))
+
+
+def _search_recency(query: str) -> str | None:
+    """Janela de busca compatível com DDG para reduzir evidência envelhecida."""
+    text = query.lower()
+    if any(term in text for term in VERY_CURRENT_TERMS):
+        return "d"
+    if exige_fontes_atualizadas(text):
+        return "m"
+    return None
+
+
+def deve_pesquisar(pergunta: str, modo: str = "auto") -> bool:
+    """Roteia para pesquisa sem depender de uma autoconfiança do modelo.
+
+    Modelos pequenos não estimam incerteza factual de forma confiável. Em modo
+    ``auto`` o roteador é deliberadamente conservador: perguntas factuais vão
+    para fontes; conversa casual, escrita criativa e tradução não gastam uma
+    consulta web. O cliente ainda pode usar ``always`` ou ``never``.
+    """
+    if modo not in {"auto", "always", "never"}:
+        raise ValueError("modo de pesquisa deve ser auto, always ou never")
+    if modo == "always":
+        return True
+    if modo == "never":
+        return False
+    text = re.sub(r"\s+", " ", pergunta.lower()).strip()
+    if not text or any(re.search(pattern, text) for pattern in CASUAL_PATTERNS):
+        return False
+    if precisa_buscar(text):
+        return True
+    return any(re.search(pattern, text) for pattern in FACTUAL_PATTERNS)
 
 
 def _is_safe_public_url(url):
@@ -134,9 +196,34 @@ def _search_ddg(query,limit):
     results=[]
     with DDGS() as client:
         for i in client.text(query,region="br-pt",safesearch="moderate",
-                             timelimit="y" if precisa_buscar(query) else None,max_results=limit):
+                             timelimit=_search_recency(query),max_results=limit):
             results.append(SearchResult(str(i.get("title","")),str(i.get("href",i.get("url",""))),
                 str(i.get("body",i.get("snippet",""))),"duckduckgo",str(i.get("date","") or "")))
+    return results
+
+
+def _search_bing_rss(query: str, limit: int) -> list[SearchResult]:
+    """Consulta o feed RSS público do Bing sem exigir chave ou SDK local.
+
+    É um fallback operacional para instalações locais que não possuem SearXNG,
+    uma chave Brave ou o pacote opcional ``ddgs``. Os links ainda passam pela
+    validação SSRF e pela extração de conteúdo antes de chegar ao prompt.
+    """
+    response = requests.get(
+        "https://www.bing.com/search",
+        params={"format": "rss", "q": query},
+        headers={"User-Agent": USER_AGENT},
+        timeout=REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    root = ET.fromstring(response.content)
+    results: list[SearchResult] = []
+    for item in root.findall("./channel/item")[:limit]:
+        title = (item.findtext("title") or "").strip()
+        url = (item.findtext("link") or "").strip()
+        snippet = re.sub(r"<[^>]+>", "", item.findtext("description") or "")
+        if title and url:
+            results.append(SearchResult(title, url, snippet, "bing_rss"))
     return results
 
 
@@ -182,19 +269,53 @@ def _deduplicate(results: Iterable[SearchResult]):
     return unique
 
 
+def _result_domain(result: SearchResult) -> str:
+    return (urlparse(result.url).hostname or "").lower()
+
+
+def _is_trusted_domain(domain: str) -> bool:
+    return any(domain == suffix or domain.endswith(suffix) for suffix in TRUSTED_SUFFIXES)
+
+
+def tem_evidencia_suficiente(
+    results: Iterable[SearchResult], *, exige_atualidade: bool = False
+) -> bool:
+    """Aplica um gate determinístico antes de deixar o modelo redigir fatos.
+
+    Para perguntas estáveis, uma fonte legível pode bastar. Para dados atuais,
+    Wikipédia não conta como prova independente: exigimos duas origens legíveis
+    ou uma origem reconhecidamente primária/confiável.
+    """
+    useful = [
+        result for result in results
+        if result.url and len((result.content or result.snippet).strip()) >= 40
+    ]
+    if not useful:
+        return False
+    if not exige_atualidade:
+        return True
+
+    current = [result for result in useful if result.provider != "wikipedia"]
+    if not current:
+        return False
+    domains = {_result_domain(result) for result in current}
+    return len(domains) >= 2 or any(_is_trusted_domain(domain) for domain in domains)
+
+
 def search_web(query: str,max_results: int=MAX_RESULTS,use_cache: bool=True) -> List[SearchResult]:
     query=re.sub(r"\s+"," ",query).strip()[:500]
     if not query: return []
+    cache_age = 900 if exige_fontes_atualizadas(query) else CACHE_TTL_SECONDS
     if use_cache:
-        cached=cache_get(query)
+        cached=cache_get(query, cache_age)
         if cached is not None: return cached
     results=[]
-    for provider in (_search_searxng,_search_brave,_search_ddg):
+    for provider in (_search_searxng, _search_brave, _search_ddg, _search_bing_rss):
         try:
             results.extend(provider(query,max_results*2))
             if len(results)>=max_results: break
         except Exception as exc: print(f"[WebV4] {provider.__name__} falhou: {exc}")
-    if len(results)<2 and not precisa_buscar(query):
+    if len(results)<2:
         try: results.extend(_search_wikipedia(query,max_results))
         except Exception as exc: print(f"[WebV4] Wikipedia falhou: {exc}")
     results=_deduplicate(results)[:max_results*2]

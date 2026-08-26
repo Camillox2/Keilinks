@@ -248,7 +248,7 @@ def pack(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Packer SFT streaming para milhões de conversas")
-    parser.add_argument("--vocab", default="dados/vocab_v4.json")
+    parser.add_argument("--vocab", default="dados/v4/pretrain/tokenizer.json")
     parser.add_argument("--output", default="dados/v4/packed-scale")
     parser.add_argument("--context", type=int, default=2048)
     parser.add_argument("--validation-ratio", type=float, default=0.02)

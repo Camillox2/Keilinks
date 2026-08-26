@@ -458,7 +458,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="SFT assistant-only da Keilinks V4"
     )
-    parser.add_argument("--model", default="core_380m")
+    parser.add_argument("--model", default="core_380m_modern")
     parser.add_argument("--profile", default="rtx5050_sft_380m")
     parser.add_argument("--data", default="dados/v4/packed")
     parser.add_argument("--output", default="checkpoints/v4-sft")

@@ -278,7 +278,7 @@ def run_continuous_improvement_loop(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Auto-Melhoria Contínua Keilinks V5")
     parser.add_argument("--checkpoint", default="checkpoints/v4-sft/keilinks_v4.pt")
-    parser.add_argument("--vocab", default="dados/vocab_v4.json")
+    parser.add_argument("--vocab", default="dados/v4/pretrain/tokenizer.json")
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument(

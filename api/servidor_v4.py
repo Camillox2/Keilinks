@@ -31,7 +31,7 @@ ADMIN_TOKEN = os.getenv("KEILINKS_ADMIN_TOKEN", "").strip()
 WRITE_ENDPOINTS = {"/api/ensinar", "/api/crawl"}
 CANDIDATES_PATH = BASE_DIR / "dados" / "v4" / "candidates" / "runtime_feedback.jsonl"
 DEFAULT_CHECKPOINT = BASE_DIR / "checkpoints" / "v4-sft" / "keilinks_v4.pt"
-DEFAULT_VOCAB = BASE_DIR / "dados" / "vocab_v4.json"
+DEFAULT_VOCAB = BASE_DIR / "dados" / "v4" / "pretrain" / "tokenizer.json"
 
 runtime: Optional[V4Runtime] = None
 _original_chat = legacy.app.view_functions.get("chat")
@@ -184,6 +184,7 @@ def chat_v4():
             memory_context=memory_context,
             semantic_context=semantic_context,
             web_enabled=bool(payload.get("web_enabled", True)),
+            web_mode=str(payload.get("web_mode", "auto")),
             max_new_tokens=min(int(payload.get("max_tokens", 256)), 512),
             temperature=float(payload.get("temperatura", 0.75)),
             top_p=float(payload.get("top_p", 0.9)),
@@ -246,6 +247,7 @@ def chat_stream_v4():
             answer = runtime.answer(
                 message,
                 web_enabled=bool(payload.get("web_enabled", True)),
+                web_mode=str(payload.get("web_mode", "auto")),
                 max_new_tokens=min(int(payload.get("max_tokens", 256)), 512),
                 temperature=float(payload.get("temperatura", 0.75)),
             )

@@ -8,7 +8,14 @@ from typing import Iterable, List, Optional, Sequence
 
 import torch
 
-from busca.web_v4 import SearchResult, format_context, precisa_buscar, search_web
+from busca.web_v4 import (
+    SearchResult,
+    deve_pesquisar,
+    exige_fontes_atualizadas,
+    format_context,
+    search_web,
+    tem_evidencia_suficiente,
+)
 from treino.v4.config import ModelConfig
 from treino.v4.modelo import KeilinksV4
 from treino.v4.tokenizador import TokenizadorV4
@@ -186,6 +193,7 @@ class V4Runtime:
                memory_context: str = "",
                semantic_context: str = "",
                web_enabled: bool = True,
+               web_mode: str = "auto",
                max_new_tokens: int = 256,
                temperature: float = 0.75,
                top_p: float = 0.9) -> RuntimeAnswer:
@@ -193,12 +201,12 @@ class V4Runtime:
         if not message:
             raise ValueError("Mensagem vazia")
 
-        requires_current_sources = precisa_buscar(message)
-        if requires_current_sources and not web_enabled:
+        requires_web_sources = deve_pesquisar(message, web_mode)
+        if requires_web_sources and not web_enabled:
             return RuntimeAnswer(
                 text=(
-                    "Essa pergunta depende de informação atual, mas a pesquisa web "
-                    "está desativada. Ative a busca para eu verificar em fontes recentes."
+                    "Essa pergunta pede uma verificação factual, mas a pesquisa web "
+                    "está desativada. Ative a busca para eu consultar fontes antes de responder."
                 ),
                 sources=[],
                 used_web=False,
@@ -208,13 +216,21 @@ class V4Runtime:
 
         results: List[SearchResult] = []
         web_context = ""
-        if requires_current_sources:
+        if requires_web_sources:
             results = search_web(message)
-            if not results:
+            requires_current_evidence = exige_fontes_atualizadas(message)
+            if not tem_evidencia_suficiente(
+                results, exige_atualidade=requires_current_evidence
+            ):
+                reason = (
+                    "fontes atuais e independentes"
+                    if requires_current_evidence
+                    else "fontes legíveis e relevantes"
+                )
                 return RuntimeAnswer(
                     text=(
-                        "Não consegui obter fontes atuais para verificar essa resposta. "
-                        "Prefiro não afirmar algo potencialmente desatualizado."
+                        f"Não consegui obter {reason} suficientes para verificar essa resposta. "
+                        "Prefiro não transformar uma suposição em fato; tente novamente ou indique uma fonte."
                     ),
                     sources=[],
                     used_web=False,

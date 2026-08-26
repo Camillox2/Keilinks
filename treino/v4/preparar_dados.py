@@ -401,7 +401,7 @@ def main() -> None:
     sub.add_parser("merge-sft")
     sub.add_parser("export-pretrain")
     packed = sub.add_parser("pack-sft")
-    packed.add_argument("--vocab", default="dados/vocab_v4.json")
+    packed.add_argument("--vocab", default="dados/v4/pretrain/tokenizer.json")
     packed.add_argument("--context", type=int, default=2048)
     args = parser.parse_args()
 

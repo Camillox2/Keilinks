@@ -95,6 +95,24 @@ MODEL_PROFILES: Dict[str, ModelConfig] = {
         attn_logit_softcapping=50.0,
         final_logit_softcapping=30.0,
     ),
+    "core_380m_modern": ModelConfig(
+        # Perfil operacional para a RTX 5050. QK-Norm e RoPE de contexto
+        # longo são preservados, mas os soft-caps ficam desligados porque
+        # eles exigem materializar a matriz QK e desativam o caminho SDPA/
+        # Flash Attention. O perfil experimental acima continua disponível
+        # somente para benchmarks A/B curtos.
+        name="Keilinks Core V4 Modern 380M",
+        dim=1_152,
+        n_layers=24,
+        n_heads=18,
+        n_kv_heads=6,
+        ff_dim=3_072,
+        rope_theta=500_000.0,
+        norm_eps=1e-6,
+        use_qk_norm=True,
+        attn_logit_softcapping=0.0,
+        final_logit_softcapping=0.0,
+    ),
     "core_800m": ModelConfig(
         name="Keilinks Core V4 800M Experimental", dim=1_536, n_layers=30,
         n_heads=24, n_kv_heads=6, ff_dim=4_096,

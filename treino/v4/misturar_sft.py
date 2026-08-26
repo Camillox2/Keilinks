@@ -100,7 +100,10 @@ def enforce_all_caps(records: List[dict], args: argparse.Namespace,
             args.translation_ratio_each,
         ),
         (
-            lambda record: str(record.get("source", "")) == "synthetic_ollama_v4",
+            lambda record: (
+                bool(record.get("synthetic", False))
+                or str(record.get("source", "")) == "synthetic_ollama_v4"
+            ),
             args.synthetic_ratio,
         ),
     ]
@@ -119,12 +122,14 @@ def build_mix(args: argparse.Namespace) -> dict:
     curated_paths = [
         Path(value.strip()) for value in args.curated.split(",") if value.strip()
     ]
+    public_paths = [Path(value) for value in args.public]
     sources: Dict[str, List[dict]] = {
         "curated": load_many(curated_paths, "keilinks_curated_v4"),
         "oasst2": load_records(Path(args.oasst2), "oasst2_portuguese"),
         "alpaca": load_records(Path(args.alpaca), "alpaca_ptbr"),
         "dolly": load_records(Path(args.dolly), "dolly_ptbr"),
         "synthetic": load_records(Path(args.synthetic), "synthetic_ollama_v4"),
+        "public": load_many(public_paths, "public_sft"),
     }
     sources = {name: deduplicate(records) for name, records in sources.items()}
     max_total = max(1, args.max_examples)
@@ -141,6 +146,7 @@ def build_mix(args: argparse.Namespace) -> dict:
     selected.extend(take_random(
         sources["synthetic"], int(max_total * args.synthetic_ratio), rng
     ))
+    selected.extend(sources["public"])
     selected = deduplicate(selected)
 
     if len(selected) > max_total:
@@ -169,11 +175,18 @@ def build_mix(args: argparse.Namespace) -> dict:
     ratios = {
         source: round(count / total, 6) for source, count in counts.items()
     }
+    synthetic_share = sum(
+        1
+        for record in selected
+        if bool(record.get("synthetic", False))
+        or str(record.get("source", "")) == "synthetic_ollama_v4"
+    ) / total
     report = {
         "output": str(output),
         "seed": args.seed,
         "max_examples": max_total,
         "synthetic_ratio_cap": args.synthetic_ratio,
+        "synthetic_ratio_actual": round(synthetic_share, 6),
         "translation_ratio_each_cap": args.translation_ratio_each,
         "curated_paths": [str(path) for path in curated_paths],
         "available": {name: len(records) for name, records in sources.items()},
@@ -182,7 +195,7 @@ def build_mix(args: argparse.Namespace) -> dict:
         "selected_ratio_by_source": ratios,
         "selected_by_category": dict(categories),
     }
-    if ratios.get("synthetic_ollama_v4", 0.0) > args.synthetic_ratio + 1e-9:
+    if synthetic_share > args.synthetic_ratio + 1e-9:
         raise RuntimeError("Mix sintético excedeu o limite configurado")
     for source in ("alpaca_ptbr", "dolly_ptbr"):
         if ratios.get(source, 0.0) > args.translation_ratio_each + 1e-9:
@@ -211,6 +224,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dolly", default="dados/v4/sft/dolly_ptbr.jsonl")
     parser.add_argument(
         "--synthetic", default="dados/v4/sft/synthetic_ollama_v4.jsonl"
+    )
+    parser.add_argument(
+        "--public",
+        action="append",
+        default=[],
+        help="JSONL coletado por coletar_conversas.py; pode aparecer mais de uma vez.",
     )
     parser.add_argument("--output", default="dados/v4/sft/all_sft.jsonl")
     parser.add_argument("--max-examples", type=int, default=200_000)

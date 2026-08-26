@@ -11,7 +11,7 @@ from treino.v4.tokenizador import TokenizadorV4
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--vocab", default="dados/vocab_v4.json")
+    parser.add_argument("--vocab", default="dados/v4/pretrain/tokenizer.json")
     parser.add_argument("--input", nargs="+", default=["dados/v4/sft/all_sft.jsonl"])
     parser.add_argument("--output", default="dados/v4/packed")
     parser.add_argument("--context", type=int, default=2048)

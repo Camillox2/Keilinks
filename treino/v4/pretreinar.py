@@ -542,14 +542,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Pré-treino causal Keilinks V4"
     )
-    parser.add_argument("--model", default="core_380m")
+    parser.add_argument("--model", default="core_380m_modern")
     parser.add_argument("--profile", default="rtx5050_380m")
     parser.add_argument(
         "--input",
         default="dados/v4/pretrain/pretrain_pt.txt",
     )
     parser.add_argument(
-        "--vocab", default="dados/vocab_v4.json"
+        "--vocab", default="dados/v4/pretrain/tokenizer.json"
     )
     parser.add_argument(
         "--binary-dir",

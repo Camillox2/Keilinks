@@ -106,7 +106,7 @@ def run(args: argparse.Namespace) -> dict:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Avaliação Keilinks V4")
     parser.add_argument("--checkpoint", default="checkpoints/v4-sft/keilinks_v4.pt")
-    parser.add_argument("--vocab", default="dados/vocab_v4.json")
+    parser.add_argument("--vocab", default="dados/v4/pretrain/tokenizer.json")
     parser.add_argument("--eval", default="dados/v4/eval/keilinks_eval_v4.jsonl")
     parser.add_argument("--output", default="checkpoints/v4-sft/eval_report.json")
     parser.add_argument("--temperature", type=float, default=0.2)
