@@ -117,6 +117,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sft", default="dados/v4/sft/all_sft_380m.jsonl")
     parser.add_argument("--binary-dir", default="dados/v4/pretrain_binary")
     parser.add_argument("--output", default="checkpoints/v4-pretrain-380m")
+    parser.add_argument("--model", default="core_380m_modern")
+    parser.add_argument("--profile", default="rtx5050_380m")
     parser.add_argument("--burn-in-steps", type=int, default=400)
     parser.add_argument("--long-steps", type=int, default=160_000)
     parser.add_argument("--continue-after-burn-in", action="store_true")
@@ -171,8 +173,8 @@ def main() -> None:
     if not metadata.exists():
         require_free_space(ROOT, args.minimum_free_gib)
         run_module(
-            "treino.v4.pretreinar", "--model", "core_380m_modern",
-            "--profile", "rtx5050_380m", "--input", str(corpus),
+            "treino.v4.pretreinar", "--model", args.model,
+            "--profile", args.profile, "--input", str(corpus),
             "--vocab", str(vocab), "--binary-dir", str(binary_dir),
             "--prepare-only", "--rebuild-binary",
         )
@@ -184,8 +186,8 @@ def main() -> None:
     if not burn_checkpoint.exists():
         burn_resume = ["--resume", str(paused_checkpoint)] if paused_checkpoint.exists() else []
         run_module(
-            "treino.v4.pretreinar", "--model", "core_380m_modern",
-            "--profile", "rtx5050_380m", "--input", str(corpus),
+            "treino.v4.pretreinar", "--model", args.model,
+            "--profile", args.profile, "--input", str(corpus),
             "--vocab", str(vocab), "--binary-dir", str(binary_dir),
             "--output", str(output), "--steps", str(args.burn_in_steps), *burn_resume,
         )
@@ -206,8 +208,8 @@ def main() -> None:
         f"a partir de {long_resume.name}"
     )
     run_module(
-        "treino.v4.pretreinar", "--model", "core_380m_modern",
-        "--profile", "rtx5050_380m", "--input", str(corpus),
+        "treino.v4.pretreinar", "--model", args.model,
+        "--profile", args.profile, "--input", str(corpus),
         "--vocab", str(vocab), "--binary-dir", str(binary_dir),
         "--output", str(output), "--steps", str(args.long_steps),
         "--resume", str(long_resume),

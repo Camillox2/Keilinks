@@ -7,7 +7,6 @@ agressivo e possivelmente offload.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Dict
 
 
 @dataclass(frozen=True)
@@ -73,7 +72,7 @@ class TrainConfig:
     seed: int = 42
 
 
-MODEL_PROFILES: Dict[str, ModelConfig] = {
+MODEL_PROFILES: dict[str, ModelConfig] = {
     "core_380m": ModelConfig(
         name="Keilinks Core V4 380M", dim=1_152, n_layers=24,
         n_heads=18, n_kv_heads=6, ff_dim=3_072,
@@ -95,18 +94,32 @@ MODEL_PROFILES: Dict[str, ModelConfig] = {
         attn_logit_softcapping=50.0,
         final_logit_softcapping=30.0,
     ),
-    "core_380m_modern": ModelConfig(
-        # Perfil operacional para a RTX 5050. QK-Norm e RoPE de contexto
-        # longo são preservados, mas os soft-caps ficam desligados porque
-        # eles exigem materializar a matriz QK e desativam o caminho SDPA/
-        # Flash Attention. O perfil experimental acima continua disponível
-        # somente para benchmarks A/B curtos.
-        name="Keilinks Core V4 Modern 380M",
+    "core_380m_modern_2k": ModelConfig(
+        # Compatibilidade para checkpoints antigos e benchmarks A/B. O perfil
+        # operacional abaixo passou a usar 8k após medição na RTX 5050.
+        name="Keilinks Core V4 Modern 380M (2K legado)",
         dim=1_152,
         n_layers=24,
         n_heads=18,
         n_kv_heads=6,
         ff_dim=3_072,
+        rope_theta=500_000.0,
+        norm_eps=1e-6,
+        use_qk_norm=True,
+        attn_logit_softcapping=0.0,
+        final_logit_softcapping=0.0,
+    ),
+    "core_380m_modern": ModelConfig(
+        # Perfil operacional da RTX 5050. O benchmark local confirmou 8k
+        # estáveis com checkpointing completo e torch.compile. Soft-caps
+        # seguem desligados pois materializam QK e perdem a atenção fundida.
+        name="Keilinks Core V4 Modern 380M (8K)",
+        dim=1_152,
+        n_layers=24,
+        n_heads=18,
+        n_kv_heads=6,
+        ff_dim=3_072,
+        context_length=8_192,
         rope_theta=500_000.0,
         norm_eps=1e-6,
         use_qk_norm=True,
@@ -124,12 +137,21 @@ MODEL_PROFILES: Dict[str, ModelConfig] = {
 }
 
 
-TRAIN_PROFILES: Dict[str, TrainConfig] = {
-    "rtx5050_380m": TrainConfig(
-        profile="rtx5050_380m", phase="pretrain",
+TRAIN_PROFILES: dict[str, TrainConfig] = {
+    "rtx5050_380m_2k": TrainConfig(
+        profile="rtx5050_380m_2k", phase="pretrain",
         micro_batch_size=1, grad_accum_steps=16,
         max_steps=160_000, learning_rate=3e-4, min_learning_rate=3e-5,
         warmup_steps=2_000, checkpoint_mode="selective", checkpoint_every=2,
+        optimizer="adamw_8bit",
+    ),
+    "rtx5050_380m": TrainConfig(
+        profile="rtx5050_380m", phase="pretrain",
+        # 1 x 8.192 x 4 preserva os 32.768 tokens por atualização do perfil
+        # 2k, enquanto o checkpoint completo manteve pico abaixo de 7 GiB.
+        micro_batch_size=1, grad_accum_steps=4,
+        max_steps=160_000, learning_rate=3e-4, min_learning_rate=3e-5,
+        warmup_steps=2_000, checkpoint_mode="full", checkpoint_every=1,
         optimizer="adamw_8bit",
     ),
     "rtx5050_500m": TrainConfig(

@@ -22,22 +22,30 @@ Use `core_380m_modern`, não `core_380m_v5_experimental`, para o treino longo:
 - QK-Norm e RoPE com theta 500.000 para estabilidade e contexto longo;
 - **soft-capping desativado**. O experimento de soft-capping materializa `QKᵀ`
   e perde o caminho SDPA/Flash Attention, o que é inadequado para 8 GB;
-- BF16, TF32, AdamW 8-bit e checkpointing seletivo a cada duas camadas.
+- BF16, TF32, AdamW 8-bit, `torch.compile` e checkpointing **completo**.
 
-Benchmark local de 26/08/2026, com batch físico 1 e 2.048 tokens:
+O perfil operacional usa contexto nativo de **8.192 tokens**, batch físico 1 e
+quatro microbatches por atualização. Assim preserva 32.768 tokens por passo de
+otimização (`1 × 8.192 × 4`), a mesma exposição do perfil 2k legado
+(`1 × 2.048 × 16`), sem reduzir o lote efetivo.
 
-| Métrica | Baseline eager | `torch.compile` |
-| --- | ---: | ---: |
-| VRAM de pico medida | 5,69 GB | 4,41 GB |
-| Vazão medida | 3.368 tokens/s | 3.963 tokens/s |
-| Perfil efetivo | 16 microbatches por passo |
-| Exposição-alvo inicial | 160.000 × 16 × 2.048 = 5,24B tokens |
+Benchmark local de 26/08/2026, na RTX 5050 Laptop de 8 GB, com forward/backward
+BF16 do Core 380M:
 
-O caminho compilado ficou 17,7% mais rápido no teste quente de cinco passos. A
-meta acima implica aproximadamente 15,3 dias de computação ideal nessa vazão;
-logs, checkpoints, validação, temperatura e processos concorrentes aumentam
-esse tempo. Trate o primeiro ciclo como um experimento longo e retomável, não
-como um download que termina o modelo.
+| Janela / modo | VRAM de pico | Vazão | Decisão |
+| --- | ---: | ---: | --- |
+| 2.048, seletivo | 4,87 GB | 2.181 tok/s | compatibilidade 2k |
+| 4.096, completo | 4,14 GB | 2.214 tok/s | cabe, mas 8k é preferível |
+| 8.192, completo | 6,56 GB | 2.154 tok/s | estável em cinco passos |
+| 8.192, completo + `torch.compile` | 5,45 GB | 2.651 tok/s | perfil operacional |
+| 16.384, completo | 9,92 GB | 790 tok/s | não usar para treino nesta GPU |
+
+O prefill de inferência cabe até 16k (3,47 GB de pico), mas isso não prova
+qualidade posicional nem viabilidade de pré-treino. A meta de 160.000 passos
+em 8k continua sendo 5,24B tokens e equivale a aproximadamente 22,9 dias
+ideais na vazão compilada medida; logs, validações, temperatura e pausas podem
+aumentar esse prazo. Trate o ciclo como experimento longo e retomável, não como
+um download que termina o modelo.
 
 ## Acompanhamento e pausa segura
 

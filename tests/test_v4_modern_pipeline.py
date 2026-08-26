@@ -14,7 +14,7 @@ from busca.web_v4 import (
     exige_fontes_atualizadas,
     tem_evidencia_suficiente,
 )
-from treino.v4.config import get_model_config
+from treino.v4.config import get_model_config, get_train_config
 from treino.v4.montar_corpus import assemble
 from treino.v4.tokenizador import REQUIRED_SPECIALS, TokenizadorV4, build_vocab
 
@@ -24,8 +24,12 @@ class TestModernV4Pipeline(unittest.TestCase):
         config = get_model_config("core_380m_modern")
         self.assertTrue(config.use_qk_norm)
         self.assertEqual(config.rope_theta, 500_000.0)
+        self.assertEqual(config.context_length, 8_192)
         self.assertEqual(config.attn_logit_softcapping, 0.0)
         self.assertEqual(config.final_logit_softcapping, 0.0)
+        train = get_train_config("rtx5050_380m")
+        self.assertEqual(train.grad_accum_steps, 4)
+        self.assertEqual(train.checkpoint_mode, "full")
 
     def test_conservative_web_router(self) -> None:
         self.assertFalse(deve_pesquisar("Oi, tudo bem?"))
