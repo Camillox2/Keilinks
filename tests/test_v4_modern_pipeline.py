@@ -8,6 +8,7 @@ from pathlib import Path
 
 from busca.web_v4 import (
     SearchResult,
+    _is_safe_public_url,
     _is_trusted_domain,
     deve_pesquisar,
     exige_fontes_atualizadas,
@@ -62,6 +63,8 @@ class TestModernV4Pipeline(unittest.TestCase):
         )
         self.assertTrue(_is_trusted_domain("www.bcb.gov.br"))
         self.assertFalse(_is_trusted_domain("naowikipedia.org"))
+        self.assertFalse(_is_safe_public_url("http://127.0.0.1/private"))
+        self.assertFalse(_is_safe_public_url("http://localhost/private"))
 
     def test_hf_tokenizer_preserves_v4_specials(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -325,7 +325,13 @@ def search_web(query: str,max_results: int=MAX_RESULTS,use_cache: bool=True) -> 
     if len(results)<2:
         try: results.extend(_search_wikipedia(query,max_results))
         except Exception as exc: print(f"[WebV4] Wikipedia falhou: {exc}")
-    results=_deduplicate(results)[:max_results*2]
+    # Não mantenha snippets/URLs inseguros apenas porque a extração de página
+    # os recusaria depois: eles também não devem chegar ao contexto do modelo.
+    results = [
+        result
+        for result in _deduplicate(results)
+        if _is_safe_public_url(result.url)
+    ][:max_results * 2]
     with ThreadPoolExecutor(max_workers=min(4,len(results) or 1)) as executor:
         futures={executor.submit(_extract_page,r.url):r for r in results[:max_results]}
         for future in as_completed(futures): futures[future].content=future.result()
