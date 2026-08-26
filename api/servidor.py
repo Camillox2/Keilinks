@@ -15,6 +15,7 @@ import sys
 import os
 import json
 import threading
+import hmac
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,7 +47,25 @@ from cerebro.normalizador import normalizar
 from cerebro.consciencia import Consciencia
 
 app = Flask(__name__)
-CORS(app)
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("KEILINKS_CORS_ORIGINS", "http://127.0.0.1:5000,http://localhost:5000").split(",")
+    if origin.strip()
+]
+CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
+
+
+@app.before_request
+def bloquear_acesso_externo_sem_chave():
+    """O servidor legado é local por padrão; rede exige chave explícita."""
+    remote = request.remote_addr or ""
+    if remote in {"127.0.0.1", "::1", "localhost"}:
+        return None
+    expected = os.getenv("KEILINKS_LEGACY_API_KEY", "")
+    supplied = request.headers.get("X-API-Key", "")
+    if len(expected) < 24 or not hmac.compare_digest(expected, supplied):
+        return jsonify({"erro": "acesso externo exige KEILINKS_LEGACY_API_KEY"}), 403
+    return None
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 modelos_carregados = {}
@@ -805,4 +824,8 @@ def ver_crawler_log():
 
 if __name__ == '__main__':
     inicializar()
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(
+        host=os.getenv('KEILINKS_HOST', '127.0.0.1'),
+        port=int(os.getenv('KEILINKS_PORT', '5000')),
+        debug=False,
+    )

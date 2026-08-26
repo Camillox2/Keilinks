@@ -7,6 +7,7 @@ __pycache__/
 venv/
 .venv/
 .venv-v4/
+.venv-unsloth/
 env/
 ENV/
 
@@ -43,6 +44,8 @@ desktop.ini
 
 # Model checkpoints and large binaries
 checkpoints/
+artifacts/
+models/
 *.pt
 *.pth
 *.ckpt
@@ -60,6 +63,7 @@ dados/pretreino/
 dados/vocab_pretreino.json
 dados/dpo_pares.jsonl
 dados/arena_v3_log.json
+dados/v4/seed_conversas.jsonl
 
 # Compiled extensions
 *.so
@@ -71,6 +75,8 @@ coverage.xml
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Embeddings cache
 dados/*.npy
@@ -78,3 +84,10 @@ dados/*.npy
 # Other
 node_modules/
 venv_
+
+# Keilinks V5 local state
+data_local/
+keilinks_data/
+mlruns/
+*.jsonl.lock
+unsloth_compiled_cache/

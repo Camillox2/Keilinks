@@ -73,6 +73,15 @@ def infinite_batches(loader: DataLoader) -> Iterator[Tuple[torch.Tensor, torch.T
 
 def build_optimizer(model: torch.nn.Module, config: TrainConfig,
                     device: torch.device):
+    if config.optimizer in {"muon_hybrid", "muon"}:
+        from treino.v4.muon import build_muon_hybrid_optimizer
+        return build_muon_hybrid_optimizer(
+            model,
+            lr_muon=getattr(config, "lr_muon", 0.02),
+            lr_adam=config.learning_rate,
+            weight_decay=config.weight_decay,
+            device_type=device.type,
+        )
     if config.optimizer == "adamw_8bit":
         try:
             import bitsandbytes as bnb
@@ -251,6 +260,11 @@ def resolve_bootstrap(args: argparse.Namespace, requested: ModelConfig,
 def train(args: argparse.Namespace) -> None:
     requested_config = get_model_config(args.model)
     train_config = get_train_config(args.profile)
+    if train_config.optimizer in {"muon_hybrid", "muon"} and not args.experimental_muon:
+        raise ValueError(
+            "Muon é experimental no Keilinks. Use --experimental-muon somente após "
+            "um benchmark de baseline e com checkpoint separado."
+        )
     if train_config.phase != "sft":
         raise ValueError(
             f"Perfil {args.profile} é de {train_config.phase}, não de SFT"
@@ -454,6 +468,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int)
     parser.add_argument("--no-compile", action="store_true")
     parser.add_argument("--allow-random-init", action="store_true")
+    parser.add_argument(
+        "--experimental-muon",
+        action="store_true",
+        help="Autoriza o otimizador Muon experimental quando o perfil o selecionar.",
+    )
     return parser.parse_args()
 
 

@@ -71,10 +71,20 @@ class GroupedQueryAttention(nn.Module):
         self.head_dim = config.dim // config.n_heads
         self.n_rep = config.n_heads // config.n_kv_heads
         self.dropout = config.dropout
+        self.use_qk_norm = getattr(config, "use_qk_norm", False)
+        self.attn_logit_softcapping = getattr(config, "attn_logit_softcapping", 0.0)
+
         self.q_proj = nn.Linear(config.dim, config.n_heads * self.head_dim, bias=False)
         self.k_proj = nn.Linear(config.dim, config.n_kv_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(config.dim, config.n_kv_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(config.n_heads * self.head_dim, config.dim, bias=False)
+
+        if self.use_qk_norm:
+            self.q_norm = RMSNorm(self.head_dim, config.norm_eps)
+            self.k_norm = RMSNorm(self.head_dim, config.norm_eps)
+        else:
+            self.q_norm = nn.Identity()
+            self.k_norm = nn.Identity()
 
     def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor,
                 cache: Optional[KVCache] = None) -> Tuple[torch.Tensor, KVCache]:
@@ -82,6 +92,11 @@ class GroupedQueryAttention(nn.Module):
         q = self.q_proj(x).view(batch, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x).view(batch, seq_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(x).view(batch, seq_len, self.n_kv_heads, self.head_dim).transpose(1, 2)
+
+        # Aplica QK-Norm para estabilidade antes de RoPE
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
         q = apply_rope(q, cos, sin)
         k = apply_rope(k, cos, sin)
         if cache is not None:
@@ -89,11 +104,34 @@ class GroupedQueryAttention(nn.Module):
             k = torch.cat((old_k, k), dim=2)
             v = torch.cat((old_v, v), dim=2)
         new_cache = (k, v)
-        out = F.scaled_dot_product_attention(
-            q, repeat_kv(k, self.n_rep), repeat_kv(v, self.n_rep),
-            dropout_p=self.dropout if self.training else 0.0,
-            is_causal=cache is None,
-        )
+
+        k_rep = repeat_kv(k, self.n_rep)
+        v_rep = repeat_kv(v, self.n_rep)
+
+        if self.attn_logit_softcapping > 0.0:
+            # SDPA não permite aplicar tanh nos logits antes do softmax.
+            # Caminho explícito é usado apenas quando o experimento V5 o pede.
+            scale = self.head_dim ** -0.5
+            scores = torch.matmul(q, k_rep.transpose(-2, -1)) * scale
+            cap = self.attn_logit_softcapping
+            scores = cap * torch.tanh(scores / cap)
+            if cache is None:
+                causal_mask = torch.ones(
+                    (seq_len, k_rep.size(-2)),
+                    dtype=torch.bool,
+                    device=scores.device,
+                ).triu(diagonal=1)
+                scores = scores.masked_fill(causal_mask, float("-inf"))
+            probabilities = F.softmax(scores.float(), dim=-1).to(dtype=q.dtype)
+            if self.training and self.dropout:
+                probabilities = F.dropout(probabilities, p=self.dropout)
+            out = torch.matmul(probabilities, v_rep)
+        else:
+            out = F.scaled_dot_product_attention(
+                q, k_rep, v_rep,
+                dropout_p=self.dropout if self.training else 0.0,
+                is_causal=cache is None,
+            )
         out = out.transpose(1, 2).contiguous().view(batch, seq_len, -1)
         return self.o_proj(out), new_cache
 
@@ -183,6 +221,9 @@ class KeilinksV4(nn.Module):
             else:
                 x, _ = block(x, cos, sin, cache=None)
         logits = self.lm_head(self.final_norm(x))
+        if getattr(self.config, "final_logit_softcapping", 0.0) > 0.0:
+            cap = self.config.final_logit_softcapping
+            logits = cap * torch.tanh(logits / cap)
         loss = None
         if labels is not None:
             loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)),
@@ -202,6 +243,9 @@ class KeilinksV4(nn.Module):
         for idx, block in enumerate(self.blocks):
             x, caches[idx] = block(x, cos, sin, cache=None)
         logits = self.lm_head(self.final_norm(x))[:, -1, :]
+        if getattr(self.config, "final_logit_softcapping", 0.0) > 0.0:
+            cap = self.config.final_logit_softcapping
+            logits = cap * torch.tanh(logits / cap)
         for _ in range(max_new_tokens):
             next_token = self._sample(logits, tokens, temperature, top_p, repetition_penalty)
             if eos_id is not None and torch.all(next_token == eos_id):

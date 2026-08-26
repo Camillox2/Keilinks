@@ -3,23 +3,31 @@ Camada de banco de dados MySQL da Keilinks
 Conexao, tabelas, CRUD para knowledge, conversas, crawler_log, memoria, usuarios e chats.
 """
 
-import os
+import base64
 import hashlib
+import hmac
+import os
+import secrets
+import time
 import pymysql
 from datetime import datetime
 
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3309,
-    'user': 'root',
-    'password': 'C@mill04',
-    'database': 'keilinks',
+    'host': os.getenv('KEILINKS_DB_HOST', '127.0.0.1'),
+    'port': int(os.getenv('KEILINKS_DB_PORT', '3309')),
+    'user': os.getenv('KEILINKS_DB_USER', 'root'),
+    'password': os.getenv('KEILINKS_DB_PASSWORD', ''),
+    'database': os.getenv('KEILINKS_DB_NAME', 'keilinks'),
     'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor,
 }
 
 
 def get_conn():
+    if not DB_CONFIG['password'] and os.getenv('KEILINKS_ALLOW_EMPTY_DB_PASSWORD') != '1':
+        raise RuntimeError(
+            'Defina KEILINKS_DB_PASSWORD; vazio só é permitido explicitamente em desenvolvimento local.'
+        )
     return pymysql.connect(**DB_CONFIG)
 
 
@@ -293,14 +301,40 @@ def memoria_todos() -> dict:
         conn.close()
 
 
-AUTH_SECRET = 'keilinks_secret_2024'
+def _auth_secret() -> bytes:
+    secret = os.getenv('KEILINKS_AUTH_SECRET', '')
+    if len(secret) < 32:
+        raise RuntimeError('KEILINKS_AUTH_SECRET precisa ter no mínimo 32 caracteres.')
+    return secret.encode('utf-8')
 
 def _hash_senha(senha: str) -> str:
-    return hashlib.sha256(senha.encode('utf-8')).hexdigest()
+    if not senha:
+        raise ValueError('senha não pode estar vazia')
+    salt = secrets.token_bytes(16)
+    derived = hashlib.scrypt(senha.encode('utf-8'), salt=salt, n=2**14, r=8, p=1)
+    return 'scrypt$16384$8$1$' + base64.b64encode(salt).decode('ascii') + '$' + base64.b64encode(derived).decode('ascii')
+
+
+def _verificar_senha(senha: str, armazenada: str) -> tuple[bool, bool]:
+    if armazenada.startswith('scrypt$'):
+        try:
+            _, n, r, p, salt_b64, hash_b64 = armazenada.split('$', 6)
+            salt = base64.b64decode(salt_b64)
+            expected = base64.b64decode(hash_b64)
+            actual = hashlib.scrypt(
+                senha.encode('utf-8'), salt=salt, n=int(n), r=int(r), p=int(p)
+            )
+            return hmac.compare_digest(actual, expected), False
+        except (ValueError, TypeError):
+            return False, False
+    legacy = hashlib.sha256(senha.encode('utf-8')).hexdigest()
+    return hmac.compare_digest(legacy, armazenada), True
 
 def _gerar_token(username: str) -> str:
-    h = hashlib.sha256((username + AUTH_SECRET).encode('utf-8')).hexdigest()
-    return f"{username}::{h}"
+    issued_at = str(int(time.time()))
+    payload = f"{username}:{issued_at}"
+    signature = hmac.new(_auth_secret(), payload.encode('utf-8'), hashlib.sha256).hexdigest()
+    return f"{payload}:{signature}"
 
 
 def usuario_criar(username: str, senha: str, nome: str = None) -> dict | None:
@@ -336,8 +370,15 @@ def usuario_login(username: str, senha: str) -> dict | None:
             user = cur.fetchone()
             if not user:
                 return None
-            if user['senha_hash'] != _hash_senha(senha):
+            valid, precisa_migrar = _verificar_senha(senha, user['senha_hash'])
+            if not valid:
                 return None
+            if precisa_migrar:
+                cur.execute(
+                    "UPDATE usuarios SET senha_hash = %s WHERE id = %s",
+                    (_hash_senha(senha), user['id'])
+                )
+                conn.commit()
             del user['senha_hash']
             user['token'] = _gerar_token(username)
             return user
@@ -346,16 +387,32 @@ def usuario_login(username: str, senha: str) -> dict | None:
 
 
 def usuario_por_token(token: str) -> dict | None:
-    if not token or '::' not in token:
+    if not token:
         return None
-    username, assinatura = token.split('::', 1)
+    try:
+        username, issued_at, signature = token.rsplit(':', 2)
+        issued_at_int = int(issued_at)
+    except (TypeError, ValueError):
+        return None
+
+    ttl_seconds = int(os.getenv('KEILINKS_AUTH_TOKEN_TTL_SECONDS', str(7 * 24 * 60 * 60)))
+    now = int(time.time())
+    if not username or ttl_seconds <= 0 or issued_at_int > now + 60 or now - issued_at_int > ttl_seconds:
+        return None
+
+    payload = f"{username}:{issued_at}"
+    expected = hmac.new(
+        _auth_secret(), payload.encode('utf-8'), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        return None
     
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT id, username, nome FROM usuarios WHERE username = %s", (username,))
             user = cur.fetchone()
-            if user and _gerar_token(user['username']) == token:
+            if user:
                 return user
         return None
     finally:

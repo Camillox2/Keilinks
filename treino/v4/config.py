@@ -20,9 +20,14 @@ class ModelConfig:
     n_kv_heads: int = 6
     ff_dim: int = 3_072
     context_length: int = 2_048
+    # Defaults V4 preservam compatibilidade com checkpoints já existentes.
+    # Experimentos V5 devem usar um perfil explícito abaixo.
     rope_theta: float = 10_000.0
     dropout: float = 0.0
     norm_eps: float = 1e-5
+    use_qk_norm: bool = False
+    attn_logit_softcapping: float = 0.0
+    final_logit_softcapping: float = 0.0
 
     def validate(self) -> None:
         if self.dim % self.n_heads:
@@ -33,6 +38,10 @@ class ModelConfig:
             raise ValueError("ff_dim deve ser maior que dim")
         if self.context_length < 128:
             raise ValueError("context_length muito pequeno")
+        if self.rope_theta <= 0:
+            raise ValueError("rope_theta deve ser positivo")
+        if self.attn_logit_softcapping < 0 or self.final_logit_softcapping < 0:
+            raise ValueError("soft-capping não pode ser negativo")
 
     def to_dict(self) -> dict:
         self.validate()
@@ -72,6 +81,19 @@ MODEL_PROFILES: Dict[str, ModelConfig] = {
     "core_500m": ModelConfig(
         name="Keilinks Core V4 500M", dim=1_280, n_layers=26,
         n_heads=20, n_kv_heads=5, ff_dim=3_584,
+    ),
+    "core_380m_v5_experimental": ModelConfig(
+        name="Keilinks Core V5 Experimental 380M",
+        dim=1_152,
+        n_layers=24,
+        n_heads=18,
+        n_kv_heads=6,
+        ff_dim=3_072,
+        rope_theta=500_000.0,
+        norm_eps=1e-6,
+        use_qk_norm=True,
+        attn_logit_softcapping=50.0,
+        final_logit_softcapping=30.0,
     ),
     "core_800m": ModelConfig(
         name="Keilinks Core V4 800M Experimental", dim=1_536, n_layers=30,

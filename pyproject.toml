@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keilinks"
+version = "5.0.0a1"
+description = "Assistente local multimodal em português brasileiro"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.8",
+  "python-multipart>=0.0.12",
+  "pymysql>=1.1",
+]
+
+[project.optional-dependencies]
+train = [
+  "datasets>=3.0",
+  "transformers>=4.55",
+  "trl>=0.20",
+  "accelerate>=1.0",
+  "peft>=0.15",
+  "safetensors>=0.5",
+]
+rag = [
+  "sentence-transformers>=3.0",
+]
+vision = [
+  "pillow>=10.4",
+  "num2words>=0.5.14",
+]
+eval = [
+  "lm-eval>=0.4",
+]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.8",
+]
+
+[tool.setuptools.packages.find]
+include = ["keilinks_v5*", "treino*", "api*"]
+namespaces = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
