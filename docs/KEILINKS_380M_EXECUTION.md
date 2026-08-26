@@ -64,20 +64,56 @@ gerado para aquela resposta.
 O arquivo `treino/v4/preparar_raciocinio.py` gera 640 exemplos PT-BR
 determinísticos e verificáveis: contas, porcentagens, condições lógicas,
 comparação por critério, investigação de erro e decisão de consultar a web.
-Eles entram como aproximadamente 6,9% do SFT misturado atual (640 de 9.270
-exemplos), suficiente para ensinar o formato sem substituir conversa humana,
-empatia e instruções reais.
+No SFT conversacional V2, 350 deles correspondem a 7% do conjunto. Assim, o
+formato de plano é ensinado sem substituir conversa humana, empatia e
+instruções reais.
 
 Prepare o estágio antes do SFT, mas **não** antes do pré-treino: pesos ainda
 aleatórios não ganham capacidade de raciocínio apenas ao ver esses exemplos.
 O pré-treino cria a base linguística; o SFT a ensina a usar o protocolo quando
 for útil.
 
+## SFT conversacional V2: mais diálogo, tom neutro e proveniência explícita
+
+O conjunto pronto em `dados/v4/sft/all_sft_380m_conversation_8k_v2.jsonl`
+tem 5.000 conversas únicas. A composição prioriza comportamento conversacional
+sem mascarar tradução ou conteúdo autoral como diálogo humano:
+
+| Categoria | Exemplos | Papel |
+| --- | ---: | --- |
+| diálogo humano com feedback | 1.500 (30%) | turnos e preferências reais em PT do OpenAssistant |
+| diálogo multi-turno traduzido e auditado | 650 (13%) | continuidade de conversa; 400 ReDial-PTBR + 250 UltraChatBR |
+| instruções humanas | 1.600 (32%) | clareza, seguimento de pedido e capacidade geral |
+| instruções sintéticas | 700 (14%) | cobertura limitada, sem dominar a personalidade |
+| raciocínio curto | 350 (7%) | plano, verificação e decisão de pesquisar na web |
+| âncoras de comportamento | 200 (4%) | empatia, correção, privacidade e estilo Keilinks |
+
+O total de exemplos orientados a diálogo é 43%; 30,02% do conjunto contém
+quatro ou mais mensagens. As respostas do assistente são filtradas contra
+excesso de gírias e metatextos desatualizados; a fala informal do **usuário** é
+preservada para compreensão. ReDial-PTBR e UltraChatBR são
+marcados como `synthetic=True` e `translated=True`; os 71 exemplos autorais
+também permanecem explicitamente sintéticos. A fração sintética total é 35,42%,
+mas somente 14% é instrução sintética genérica.
+
+O pacote de 8k validado fica em
+`dados/v4/packed_sft_conversation_8k_v2`: 179 blocos de treino, seis blocos de
+validação, 1.054.073 tokens supervisionados de treino e 34.264 de validação.
+O JSONL final tem SHA-256
+`70c6fba132d0c5046906835ca366dd85623ac65f3d61833c1d2eae67090d000b`.
+
+Em uma cópia limpa do workspace, os comandos reprodutíveis são:
+
 ```powershell
-& .\.venv-unsloth\Scripts\python.exe -m treino.v4.preparar_raciocinio
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.preparar_sft_conversacional generate-anchors
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.preparar_sft_conversacional collect-ultrachatbr `
+  --accept-terms ultrachatbr_mit
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.preparar_sft_conversacional collect-redial-ptbr `
+  --accept-terms redial_ptbr_mit
+& .\.venv-unsloth\Scripts\python.exe -m treino.v4.preparar_sft_conversacional build
 & .\.venv-unsloth\Scripts\python.exe -m treino.v4.pack_sft_em_escala `
-  --context 8192 --output dados/v4/packed_sft_8k `
-  dados/v4/sft/all_sft_380m_reasoning_8k.jsonl
+  --context 8192 --output dados/v4/packed_sft_conversation_8k_v2 `
+  dados/v4/sft/all_sft_380m_conversation_8k_v2.jsonl
 ```
 
 Depois do checkpoint de pré-treino aprovado, o SFT deve usar
@@ -87,16 +123,16 @@ quatro microbatches, checkpointing completo e `torch.compile`.
 ```powershell
 & .\.venv-unsloth\Scripts\python.exe -m treino.v4.treinar `
   --model core_380m_modern --profile rtx5050_sft_380m `
-  --data dados/v4/packed_sft_8k `
+  --data dados/v4/packed_sft_conversation_8k_v2 `
   --epochs 3 `
-  --init-checkpoint checkpoints/v4-pretrain/pretrain_best.pt `
-  --output checkpoints/v4-sft-reasoning-8k
+  --init-checkpoint checkpoints/v4-pretrain-380m/pretrain_best.pt `
+  --output checkpoints/v4-sft-conversation-8k-v2
 ```
 
 O treino SFT calcula três épocas reais por padrão quando `--steps` não é
-informado. No pacote atual de 219 blocos de treino, isso equivale a 165 passos
+informado. No pacote atual de 179 blocos de treino, isso equivale a 135 passos
 de otimização, não aos 10.000 passos máximos do perfil. Essa proteção evita
-repetir o corpus curto mais de 180 vezes e destruir a generalização da conversa.
+repetir o corpus curto centenas de vezes e destruir a generalização da conversa.
 O warmup também é limitado a no máximo 10% do ciclo efetivo, para que um SFT
 curto não passe inteiro apenas aquecendo a taxa de aprendizado.
 
@@ -182,6 +218,8 @@ O run de conversa `public-conversations-380m-01` coleta separadamente:
 | --- | --- | --- |
 | OpenAssistant OASST2 PT | conversas com feedback humano | somente cadeias PT revisadas, não removidas e não sintéticas |
 | Aya PT | instruções humanas | somente `original-annotations` |
+| [ReDial-PTBR](https://huggingface.co/datasets/matheusrdgsf/re_dial_ptbr) | diálogo humano-humano traduzido | licença MIT; limitado a 400, com marcadores de filmes removidos e `synthetic=True` |
+| [UltraChatBR](https://huggingface.co/datasets/recogna-nlp/UltrachatBR) | diálogo traduzido | licença MIT; limitado a 250 multi-turnos e marcado como sintético |
 | Tucano-SFT | diversidade de instruções | sintético; teto no mix para não dominar a personalidade |
 | conversas curadas Keilinks | identidade, empatia e regras locais | mantidas como conjunto próprio e auditável |
 
